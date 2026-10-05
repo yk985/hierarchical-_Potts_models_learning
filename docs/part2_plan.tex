@@ -1,0 +1,75 @@
+% Training plan.
+\paragraph{Status.} The unconditioned model has been trained, with $H=128$ instead of 256 at your request
+(results in \S\ref{sec:res_uncond}). The conditioned model has been trained with $H=128$ as well
+(results in \S\ref{sec:res_cond}). Both were then retrained with $H=256$ (\S\ref{sec:res_H256}), and all four
+runs were evaluated with the distance metrics of \S\ref{sec:distances} (\S\ref{sec:res_dist}).
+
+\paragraph{Commands} (in order; all have been run, for $H=128$ and for $H=256$ with the \texttt{*\_H256.json} configs):
+{\small\begin{verbatim}
+python scripts/s04_make_dataset.py              # done: 144k / 18k / 18k
+python scripts/s05_train_factored_attention.py --config configs/fa_unconditional.json
+python scripts/s05_train_factored_attention.py --config configs/fa_conditional.json
+python scripts/s06_evaluate_model.py --config configs/fa_unconditional.json
+python scripts/s06_evaluate_model.py --config configs/fa_conditional.json
+python scripts/s07_compare_to_tree.py --config <run config>   # J vs every tree J
+python scripts/s08_mode_mixing.py --config <run config>       # model or sampler?
+\end{verbatim}}
+
+\paragraph{Hyper-parameters} (\texttt{configs/fa\_unconditional.json}, \texttt{configs/fa\_conditional.json}):
+\begin{center}\small
+\begin{tabular}{p{0.2\linewidth}p{0.3\linewidth}p{0.4\linewidth}}
+\toprule
+ & unconditioned & conditioned\\
+\midrule
+heads $H$, key dim $d$ & 256, 32 & 256, 32\\
+parameters & 1{,}086{,}640 & 4{,}194{,}640\\
+training data & all 18 clades, no tags & all 18 clades, tags with hierarchical dropout (0.10/0.10/0.15)\\
+loss & PL \eqref{eq:pl} $+10^{-5}(\|h\|^2+\|J\|^2)$ & same $+\,10^{-4}\sum(\|\Delta h\|^2+\|\Delta J\|^2)$\\
+optimiser & Adam, lr $5\times10^{-3}$, batch 512 & same\\
+epochs & $\le60$, early stopping (patience 8) on val.\ PL & same\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Cost} (measured with 40 optimiser steps on the real data, NVIDIA RTX 2060): about
+$0.2$\,min per epoch (unconditioned) and $0.4$\,min per epoch (conditioned), under 0.3\,GB of GPU memory.
+That is at most $\approx12$ and $\approx25$ minutes for 60 epochs. Evaluation (Gibbs sampling of 18{,}000
+sequences per model plus the oracle samples) takes a few minutes.
+
+\paragraph{Reference values for the validation pseudo-NLL per site} (computed on the validation set):
+\begin{center}\small
+\begin{tabular}{lc}
+\toprule
+model & pseudo-NLL per site\\
+\midrule
+uniform residues (knows nothing) & $\log 20 = 3.00$\\
+independent sites, one profile $f_i$ for all clades & 2.11\\
+independent sites, one profile per clade & 1.63\\
+\textbf{true clade Potts models} (the floor for the conditioned model with full tags) & \textbf{0.80}\\
+\bottomrule
+\end{tabular}
+\end{center}
+After only 40 steps the models are at 1.80 (unconditioned) and 1.53 (conditioned). The unconditioned model
+cannot reach 0.80, because a single Potts model cannot represent the 18-clade mixture (\S\ref{sec:cond}). How
+close it gets is itself a result.
+
+\paragraph{What we will look at after training} (all produced by \texttt{s06}):
+\begin{enumerate}[nosep]
+\item training curves (\texttt{figures/models/<run>/training\_curve.png});
+\item per clade: generated $r_C$ vs the oracle $r_C$ ($\approx0.83$), \texttt{rC\_per\_clade.png};
+\item the cross-clade $r_C$ matrix and assignment accuracy: does the clade tag really select the clade
+      rather than only its family? Compare with the reference ladder 0.83 / 0.63 / 0.35 / 0.08 of \S\ref{sec:refvalues};
+\item $J$ recovery ($r_J$ on contacts) and contact precision, per clade;
+\item PCA of generated vs test sequences;
+\item unconditioned vs conditioned: what conditioning buys.
+\end{enumerate}
+
+\begin{checkbox}{Points to confirm before launching}
+\begin{enumerate}[nosep]
+\item The index reading of your formula, eq.~\eqref{eq:falogit}, together with the self-mask and the symmetrisation \eqref{eq:sym2}.
+\item $H=256$ heads, from the rank argument of \S\ref{sec:rank}. Fewer heads would test whether the model can
+      compress the couplings; our random ground truth predicts it cannot below $\approx179$.
+\item Shared attention with label-specific values/fields in the conditioned model (\S\ref{sec:cond}). The
+      alternative, label-specific $Q,K$, would let clades have different contact maps, which our ground truth does not have.
+\end{enumerate}
+\end{checkbox}

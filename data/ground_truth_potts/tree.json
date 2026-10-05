@@ -1,0 +1,286 @@
+{
+  "config": {
+    "L": 60,
+    "q": 20,
+    "n_families": 3,
+    "n_subfamilies": 3,
+    "n_clades": 2,
+    "sigma_h": [
+      1.5,
+      0.9,
+      0.5,
+      0.3
+    ],
+    "sigma_J": [
+      0.8,
+      0.45,
+      0.27,
+      0.15
+    ],
+    "n_long_contacts": 120,
+    "min_separation": 4,
+    "seed": 0
+  },
+  "nodes": {
+    "root": {
+      "level": 0,
+      "parent": null,
+      "path": []
+    },
+    "F0": {
+      "level": 1,
+      "parent": "root",
+      "path": [
+        0
+      ]
+    },
+    "F0.S0": {
+      "level": 2,
+      "parent": "F0",
+      "path": [
+        0,
+        0
+      ]
+    },
+    "F0.S0.C0": {
+      "level": 3,
+      "parent": "F0.S0",
+      "path": [
+        0,
+        0,
+        0
+      ]
+    },
+    "F0.S0.C1": {
+      "level": 3,
+      "parent": "F0.S0",
+      "path": [
+        0,
+        0,
+        1
+      ]
+    },
+    "F0.S1": {
+      "level": 2,
+      "parent": "F0",
+      "path": [
+        0,
+        1
+      ]
+    },
+    "F0.S1.C0": {
+      "level": 3,
+      "parent": "F0.S1",
+      "path": [
+        0,
+        1,
+        0
+      ]
+    },
+    "F0.S1.C1": {
+      "level": 3,
+      "parent": "F0.S1",
+      "path": [
+        0,
+        1,
+        1
+      ]
+    },
+    "F0.S2": {
+      "level": 2,
+      "parent": "F0",
+      "path": [
+        0,
+        2
+      ]
+    },
+    "F0.S2.C0": {
+      "level": 3,
+      "parent": "F0.S2",
+      "path": [
+        0,
+        2,
+        0
+      ]
+    },
+    "F0.S2.C1": {
+      "level": 3,
+      "parent": "F0.S2",
+      "path": [
+        0,
+        2,
+        1
+      ]
+    },
+    "F1": {
+      "level": 1,
+      "parent": "root",
+      "path": [
+        1
+      ]
+    },
+    "F1.S0": {
+      "level": 2,
+      "parent": "F1",
+      "path": [
+        1,
+        0
+      ]
+    },
+    "F1.S0.C0": {
+      "level": 3,
+      "parent": "F1.S0",
+      "path": [
+        1,
+        0,
+        0
+      ]
+    },
+    "F1.S0.C1": {
+      "level": 3,
+      "parent": "F1.S0",
+      "path": [
+        1,
+        0,
+        1
+      ]
+    },
+    "F1.S1": {
+      "level": 2,
+      "parent": "F1",
+      "path": [
+        1,
+        1
+      ]
+    },
+    "F1.S1.C0": {
+      "level": 3,
+      "parent": "F1.S1",
+      "path": [
+        1,
+        1,
+        0
+      ]
+    },
+    "F1.S1.C1": {
+      "level": 3,
+      "parent": "F1.S1",
+      "path": [
+        1,
+        1,
+        1
+      ]
+    },
+    "F1.S2": {
+      "level": 2,
+      "parent": "F1",
+      "path": [
+        1,
+        2
+      ]
+    },
+    "F1.S2.C0": {
+      "level": 3,
+      "parent": "F1.S2",
+      "path": [
+        1,
+        2,
+        0
+      ]
+    },
+    "F1.S2.C1": {
+      "level": 3,
+      "parent": "F1.S2",
+      "path": [
+        1,
+        2,
+        1
+      ]
+    },
+    "F2": {
+      "level": 1,
+      "parent": "root",
+      "path": [
+        2
+      ]
+    },
+    "F2.S0": {
+      "level": 2,
+      "parent": "F2",
+      "path": [
+        2,
+        0
+      ]
+    },
+    "F2.S0.C0": {
+      "level": 3,
+      "parent": "F2.S0",
+      "path": [
+        2,
+        0,
+        0
+      ]
+    },
+    "F2.S0.C1": {
+      "level": 3,
+      "parent": "F2.S0",
+      "path": [
+        2,
+        0,
+        1
+      ]
+    },
+    "F2.S1": {
+      "level": 2,
+      "parent": "F2",
+      "path": [
+        2,
+        1
+      ]
+    },
+    "F2.S1.C0": {
+      "level": 3,
+      "parent": "F2.S1",
+      "path": [
+        2,
+        1,
+        0
+      ]
+    },
+    "F2.S1.C1": {
+      "level": 3,
+      "parent": "F2.S1",
+      "path": [
+        2,
+        1,
+        1
+      ]
+    },
+    "F2.S2": {
+      "level": 2,
+      "parent": "F2",
+      "path": [
+        2,
+        2
+      ]
+    },
+    "F2.S2.C0": {
+      "level": 3,
+      "parent": "F2.S2",
+      "path": [
+        2,
+        2,
+        0
+      ]
+    },
+    "F2.S2.C1": {
+      "level": 3,
+      "parent": "F2.S2",
+      "path": [
+        2,
+        2,
+        1
+      ]
+    }
+  }
+}

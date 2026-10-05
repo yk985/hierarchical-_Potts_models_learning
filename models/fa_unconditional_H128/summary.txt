@@ -1,0 +1,12 @@
+FactoredAttentionPotts  (L=60, q=20, heads H=128, key dim d=32)
+  input   : S (batch, L) integers in [0, q)  -> one-hot (batch, L*q)
+  Q, K    : (H, L, d) = (128, 60, 32)   positional, residue-independent   [491,520 params]
+  A       : softmax_j(Q K^T / sqrt(d)), A_ii = 0  -> (H, L, L)
+  V       : (H, q, q) = (128, 20, 20)   [51,200 params]
+  h       : (L, q) = (60, 20)   [1,200 params]
+  J       : sym( sum_h A^h (x) V^h ) -> (L, L, q, q) = (60, 60, 20, 20)
+  output  : logits (batch, L, q),  logits_i(a) = h_i(a) + sum_j J_ij(a, s_j)
+  loss    : pseudo-NLL  sum_i -log softmax(logits_i)(s_i)  + lam_h||h||^2 + lam_J||J||^2
+  total trainable parameters: 543,920
+
+train sequences: 144000, val sequences: 18000

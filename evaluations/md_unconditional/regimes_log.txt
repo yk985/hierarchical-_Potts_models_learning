@@ -1,0 +1,15 @@
+[     3s] classifier accuracy on test: {'family': 1.0, 'subfamily': 0.9935555555555555, 'clade': 0.9148888888888889}
+[  1028s] cloning A_test: k_S = family 1.96, subfamily 5.67, clade 16.00
+[  2043s] cloning B_network: k_S = family 1.96, subfamily 5.64, clade 17.64
+[  2045s] theory family: sibling KL 64.5 nats, profile k_S 2.09, Gaussian k_S 1.58
+[  2047s] theory subfamily: sibling KL 23.5 nats, profile k_S 4.91, Gaussian k_S 4.35
+[  2051s] theory clade: sibling KL 10.4 nats, profile k_S 8.06, Gaussian k_S 9.82
+[  2118s] training-set matches counted
+C:\Users\youss\OneDrive\Bureau\finance\claude_code\protein_seq_gen\scripts\s13_dynamical_regimes.py:230: RuntimeWarning: divide by zero encountered in log
+  "renyi2_H2_k": (-np.log(agree)).tolist(),
+C:\Users\youss\OneDrive\Bureau\finance\claude_code\protein_seq_gen\scripts\s13_dynamical_regimes.py:239: RuntimeWarning: divide by zero encountered in log
+  col["renyi2_k_C"] = crossing(range(L + 1), -np.log(agree), math.log(n))
+[  2135s] collapse: measured k_C 6.24, quenched 6.39, annealed 10.38, entropy criterion 6.54
+[  2193s] NELBO/site train 1.1870, test 1.2187
+[  2240s] single trajectories done
+[  2243s] figures written

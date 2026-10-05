@@ -1,0 +1,31 @@
+F0.S0.C0: +8000 sequences
+F0.S0.C1: +8000 sequences
+F0.S1.C0: +8000 sequences
+F0.S1.C1: +8000 sequences
+F0.S2.C0: +8000 sequences
+F0.S2.C1: +8000 sequences
+F1.S0.C0: +8000 sequences
+F1.S0.C1: +8000 sequences
+F1.S1.C0: +8000 sequences
+F1.S1.C1: +8000 sequences
+F1.S2.C0: +8000 sequences
+F1.S2.C1: +8000 sequences
+F2.S0.C0: +8000 sequences
+F2.S0.C1: +8000 sequences
+F2.S1.C0: +8000 sequences
+F2.S1.C1: +8000 sequences
+F2.S2.C0: +8000 sequences
+F2.S2.C1: +8000 sequences
+{
+  "n_per_clade": 10000,
+  "sizes": {
+    "train": 144000,
+    "val": 18000,
+    "test": 18000
+  },
+  "per_clade": {
+    "train": 8000,
+    "val": 1000,
+    "test": 1000
+  }
+}

@@ -1,0 +1,11 @@
+MaskedDiffusionTransformer  (L=60, q=20, d_model=256, layers=6, heads=8, d_ff=1024)
+  input   : x_t (batch, L) tokens in {0..19} + [MASK]=20;  t (batch,) in [0, 1]
+  embed   : token emb (21 x 256) + position emb (60 x 256) + time emb (Fourier(t) -> MLP)   [90,880 params]
+  encoder : 6 x [LayerNorm -> multi-head self-attention (8 heads) -> LayerNorm -> MLP 256->1024->256]   [4,738,560 params]
+  head    : LayerNorm -> Linear 256 -> 20   [5,652 params]
+  output  : logits (batch, L, q) = log p_theta(x_0^i = a | x_t) up to a constant, for every site i
+  loss    : NELBO = E_t [ (1/t) sum_(masked i) -log p_theta(x_0^i | x_t) ]   (MDLM, alpha_t = 1 - t)
+  sampler : ancestral unmasking from t=1 (all [MASK]) to t=0
+  total trainable parameters: 4,835,092
+
+train sequences: 144000, val sequences: 18000

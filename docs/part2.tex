@@ -1,0 +1,420 @@
+% ==========================================================================================
+% PART II : learning J with a transformer (factored attention)
+% ==========================================================================================
+\part{Learning $J$ with a transformer}
+
+\section{Goal and data protocol}\label{sec:p2goal}
+We now train models that \emph{infer} the Potts parameters from sequences alone, and then generate new
+sequences from what they learned. Two models:
+\begin{enumerate}[nosep]
+  \item \textbf{Unconditioned model}: one set of $(h,J)$ learned from the sequences of \emph{all 18 clades together}.
+  \item \textbf{Conditioned model}: the same architecture plus hierarchical labels (family, subfamily, clade),
+        so that one can ask for ``a sequence of clade \texttt{F1.S2.C0}'' or just ``a sequence of family \texttt{F1}''.
+\end{enumerate}
+In both cases the learned object is an ordinary Potts model. We generate from it with the Gibbs sampler of
+\S\ref{sec:gibbs} and compare the generated sequences with \textbf{held-out} sequences the model never saw.
+
+\paragraph{More data.} Each clade was topped up from 2000 to $10{,}000$ independent Gibbs samples
+(the 2000 of Part~I are kept). The reason is a parameter count. A clade differs from its sibling by
+$\sigma_J^{(3)}=0.15$ on $\approx65{,}000$ gauge-free coupling entries, and the conditioned model must
+learn these differences from that clade's sequences alone. With 2000 sequences (120{,}000 site
+observations), each coupling entry would be estimated from fewer than two observations. The top-up
+runs on the GPU (\texttt{psg.torch\_sampling}, validated against exact enumeration and against the numpy
+sampler in \texttt{test\_06}).
+
+\paragraph{Split.} Each clade is split at random into train / validation / test $=80/10/10\%$:
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+ & train & validation & test\\
+\midrule
+per clade & 8000 & 1000 & 1000\\
+total (18 clades) & 144{,}000 & 18{,}000 & 18{,}000\\
+used for & gradient steps & early stopping & final evaluation only\\
+\bottomrule
+\end{tabular}
+\end{center}
+The test set is written once (\texttt{data/splits/test.npz}, one FASTA per clade) and is read only
+by the evaluation script. The test size per clade (1000) equals the half-split of Part~I, so the reference
+values of \S\ref{sec:refvalues} apply directly.
+
+%------------------------------------------------------------------------------------------
+\section{From an attention layer to a Potts model}\label{sec:fa}
+%------------------------------------------------------------------------------------------
+\subsection{Reminder: one head of self-attention}
+In a transformer, every position $i$ of the input carries a vector $\bm x_i$. One attention head computes
+three vectors per position: a \emph{query} $\bm q_i=W_Q\bm x_i$, a \emph{key} $\bm k_i=W_K\bm x_i$ and a
+\emph{value} $\bm v_i=W_V\bm x_i$. Position $i$ then looks at every position $j$ with weight
+\[
+A_{ij}=\frac{\exp(\bm q_i\cdot\bm k_j/\sqrt d)}{\sum_{j'}\exp(\bm q_i\cdot\bm k_{j'}/\sqrt d)}
+\qquad\Big(\text{so } A_{ij}\ge0,\ \textstyle\sum_jA_{ij}=1\Big),
+\]
+and outputs the weighted average $\sum_jA_{ij}\bm v_j$. The factor $1/\sqrt d$ keeps the dot products of
+order 1 when the vectors have $d$ components. $A_{ij}$ is ``how much $i$ attends to $j$''.
+
+\subsection{Factored attention: your formula, with indices}
+We make two changes. They are what turns the layer into a Potts model.
+\begin{enumerate}
+\item \textbf{Queries and keys depend only on the position, not on the residue.} For each head
+$h=1,\dots,H$ we learn two matrices $Q^h,K^h\in\mathbb R^{L\times d}$ directly (row $i$ = query/key of
+position $i$):
+\begin{equation}\label{eq:attn}
+\boxed{\;A^h_{ij}=\frac{\exp\big(Q^h_i\cdot K^h_j/\sqrt d\big)}{\sum_{j'\neq i}\exp\big(Q^h_i\cdot K^h_{j'}/\sqrt d\big)}\quad(j\neq i),\qquad A^h_{ii}=0\;}
+\end{equation}
+The attention map $A^h$ ($L\times L$) is therefore the same for every sequence. It says which pairs of
+positions head $h$ connects, like a (soft) contact map.
+\item \textbf{The value is a residue--residue matrix.} Input position $j$ is the one-hot vector
+$\bm x_j=\bm e_{s_j}$. Its value is $W_V^h\bm e_{s_j}$, and after the output projection $W_O^h$ to $q$
+residue scores we get $W_O^hW_V^h\bm e_{s_j}$. Writing $V^h=W^h_OW^h_V\in\mathbb R^{q\times q}$, the
+contribution of $j$ to the score of residue $a$ at site $i$ is $A^h_{ij}V^h(a,s_j)$.
+\end{enumerate}
+Summing over heads and positions, the score (logit) of residue $a$ at site $i$ is
+\begin{equation}\label{eq:falogit}
+\text{logit}_i(a\mid\s)=h_i(a)+\sum_{j\neq i}\tilde J_{ij}(a,s_j),\qquad
+\tilde J_{ij}(a,b)=\sum_{h=1}^H A^h_{ij}\,V^h(a,b),
+\end{equation}
+that is,
+\begin{equation}\label{eq:jformula}
+\boxed{\;\tilde J_{ij}(a,b)=\sum_{h=1}^{H}\mathrm{softmax}_j\!\Big(\tfrac{Q^hK^{h\top}}{\sqrt d}\Big)_{ij}V^h(a,b)\;}
+\end{equation}
+This is your ``$J=\sum_h\mathrm{softmax}(QK)V$'' with all indices written out: $h$ = head, $i,j$ = positions
+(attention), $a,b$ = residues (value). Compare \eqref{eq:falogit} with the Potts site conditional
+\eqref{eq:cond}: \textbf{it is exactly the local field $H_i(a\mid\s_{-i})$ of a Potts model with couplings
+$\tilde J$}. The softmax of the logits is therefore exactly $P(s_i=a\mid\s_{-i})$. Since $Q,K,V,h$ do not
+depend on the input, the network \emph{is} a Potts model and $J$ is read directly from its weights.
+(This construction is the ``factored attention'' of Bhattacharya et al., 2020.)
+
+\subsection{Three details that matter}
+\paragraph{(a) No self-attention.} If $A^h_{ii}$ were allowed, the prediction of $s_i$ could look at $s_i$
+itself and the training loss (next section) would be solved by copying. We set $A^h_{ii}=0$ by excluding
+$j=i$ from the softmax in \eqref{eq:attn} (in code: the logit is set to $-\infty$ before the softmax).
+
+\paragraph{(b) Symmetrisation.} In general $\tilde J_{ij}(a,b)\neq\tilde J_{ji}(b,a)$, because $A_{ij}\ne A_{ji}$
+and $V$ is not symmetric. A set of conditionals built from a non-symmetric $\tilde J$ is \emph{not} the
+set of conditionals of any joint distribution. Proof: if a joint $P$ existed, the ratio
+$\frac{P(a,b,\dots)P(a',b',\dots)}{P(a',b,\dots)P(a,b',\dots)}$ for sites $i,j$ could be computed by changing
+$s_i$ first or $s_j$ first. With the conditionals \eqref{eq:falogit} the two orders give
+$\tilde J_{ij}$ and $\tilde J_{ji}^\top$ respectively, which disagree. Gibbs sampling would then have no
+well-defined target. We therefore use the symmetric part
+\begin{equation}\label{eq:sym2}
+J_{ij}(a,b)=\tfrac12\big(\tilde J_{ij}(a,b)+\tilde J_{ji}(b,a)\big),
+\end{equation}
+which is a genuine Potts coupling (it satisfies \eqref{eq:sym}, and $J_{ii}=0$ by (a)). Training, export and
+sampling all use this $J$, so the learned model is exactly a Potts model and \texttt{test\_08} checks that the
+network's logits equal \texttt{Potts.local\_field} of the exported $(h,J)$ to $10^{-5}$.
+
+\paragraph{(c) Each row of $A^h$ sums to 1.} Every site $i$ must distribute a total weight of 1 over its
+partners in every head. A head that specialises on one pair $(i,j)$ still assigns weights to the other
+rows. Those weights are harmless only if they spread thinly, so that their contribution
+$A_{kj'}V^h$ is small. This is a known constraint of factored attention. We keep it, as in your formula.
+
+\subsection{How many heads? A rank argument}\label{sec:rank}
+From \eqref{eq:falogit}, every block $\tilde J_{ij}$ is a linear combination of the same $H$ matrices
+$V^1,\dots,V^H$: $\tilde J_{ij}\in\mathrm{span}(V^1,\dots,V^H)$, a space of dimension at most $H$.
+In our ground truth the 179 contact blocks were drawn \emph{independently} at random
+(\S\ref{sec:tree}), so together they span $\min(179,(q-1)^2)=179$ dimensions. To represent them exactly the
+model needs $H\ge179$ heads. We use $\bm{H=256}$. (Real proteins are much more structured: the same
+physico-chemical patterns, such as charge or hydrophobic complementarity, recur across contacts, so
+far fewer heads suffice. Our independent random blocks are the hardest case for this architecture.)
+
+\subsection{The model at a glance}
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+object & shape & meaning / count\\
+\midrule
+input $\s$ & $(B,L)=(B,60)$ integers & a batch of $B$ sequences\\
+$Q^h,K^h$ & $(H,L,d)=(256,60,32)$ each & positional queries/keys, $983{,}040$ params\\
+$A^h$ & $(256,60,60)$ & attention maps, eq.~\eqref{eq:attn} (not parameters)\\
+$V^h$ & $(256,20,20)$ & residue--residue values, $102{,}400$ params\\
+$h$ & $(60,20)$ & fields, $1{,}200$ params\\
+$J$ & $(60,60,20,20)$ & eqs.~\eqref{eq:falogit}, \eqref{eq:sym2}\\
+output & $(B,L,q)$ & logits$_i(a)=h_i(a)+\sum_jJ_{ij}(a,s_j)$\\
+\midrule
+total & & $1{,}086{,}640$ trainable parameters\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%------------------------------------------------------------------------------------------
+\section{The loss: pseudo-likelihood}\label{sec:plm}
+%------------------------------------------------------------------------------------------
+\subsection{Why not the likelihood?}
+The natural objective would be the log-likelihood of the training sequences,
+$\ell(\theta)=\frac1M\sum_m\log P_\theta(\s^m)=\frac1M\sum_m\big[-E_\theta(\s^m)\big]-\log Z(\theta)$.
+Its derivative with respect to a coupling is
+\begin{align*}
+\frac{\partial\ell}{\partial J_{ij}(a,b)} &= f^{\text{data}}_{ij}(a,b) - \frac{\partial\log Z}{\partial J_{ij}(a,b)}
+= f^{\text{data}}_{ij}(a,b) - \sum_{\s}P_\theta(\s)\,\one[s_i=a]\one[s_j=b]\\
+&= f^{\text{data}}_{ij}(a,b) - f^{\theta}_{ij}(a,b),
+\end{align*}
+using $\partial_J\log Z=\frac1Z\sum_{\s}\partial_Je^{-E}=\sum_{\s}P_\theta(\s)\,\partial_J(-E)$. The gradient
+vanishes when the model's pair frequencies equal the data's (the maximum-entropy conditions of
+\S\ref{sec:maxent}). But evaluating $f^\theta_{ij}$ requires a sum over $20^{60}$ sequences, or a full
+Monte-Carlo simulation at every gradient step. That is the obstacle.
+
+\subsection{The pseudo-likelihood}
+Replace the joint probability of a sequence by the product of its site conditionals, each of which is
+cheap (\S\ref{sec:gibbs}):
+\begin{equation}\label{eq:pl}
+\boxed{\;\mathcal L_{\text{PL}}(\theta)=\frac1M\sum_{m=1}^M\sum_{i=1}^L-\log P_\theta\big(s^m_i\mid\s^m_{-i}\big)
+=\frac1M\sum_m\sum_i\Big[-\text{logit}_i(s^m_i)+\log\sum_{a}e^{\text{logit}_i(a)}\Big]\;}
+\end{equation}
+The bracket is the ordinary \emph{cross-entropy} between the softmax of the logits and the true residue.
+So the training loop is a standard classification loss: predict each residue from all the others.
+We report it \emph{per site} (divided by $L$). A model knowing nothing scores $\log20=3.0$.
+
+\paragraph{Why it recovers the true model (consistency).} Suppose the data come from $P^\star$. As
+$M\to\infty$, each term of \eqref{eq:pl} becomes the expectation
+$\E_{\s\sim P^\star}\big[-\log P_\theta(s_i\mid\s_{-i})\big]$. For each fixed context $\s_{-i}$, this is the
+cross-entropy between $P^\star(\cdot\mid\s_{-i})$ and $P_\theta(\cdot\mid\s_{-i})$:
+\[
+-\sum_aP^\star(a\mid\s_{-i})\log P_\theta(a\mid\s_{-i}) = H\big(P^\star(\cdot\mid\s_{-i})\big)+\mathrm{KL}\big(P^\star(\cdot\mid\s_{-i})\,\|\,P_\theta(\cdot\mid\s_{-i})\big).
+\]
+The entropy term does not depend on $\theta$, and the KL divergence is $\ge0$, with equality iff the two
+conditionals coincide. So the minimum of the pseudo-likelihood is reached exactly when \emph{all} site
+conditionals of the model equal the true ones. For a Potts model the conditionals determine
+$h$ and $J$ up to a gauge: the difference of local fields between two residues, for all contexts, fixes every
+$J_{ij}(a,b)-J_{ij}(a',b)-J_{ij}(a,b')+J_{ij}(a',b')$, i.e.\ exactly the zero-sum-gauge part \eqref{eq:J0}.
+Hence \textbf{with enough data, PLM recovers the true model} (if the architecture can represent it,
+\S\ref{sec:rank}).
+
+\subsection{Regularisation = a Gaussian prior}
+We add $\lambda_h\|h\|^2+\lambda_J\|J\|^2$ to \eqref{eq:pl}. Two reasons.
+\begin{itemize}[nosep]
+\item \textbf{It fixes the gauge.} All gauge-equivalent parameter sets have the same pseudo-likelihood
+(the conditionals do not change), so without a penalty the loss has flat directions. The L2 penalty picks
+the one with the smallest norm. By the Proposition of \S\ref{sec:gauge}, that is (close to) the zero-sum gauge.
+\item \textbf{It is a prior.} Multiply \eqref{eq:pl} by $M$: $M\mathcal L_{\text{PL}}+M\lambda_J\|J\|^2$ is
+the negative log of (pseudo-likelihood) $\times\ \exp(-M\lambda_J\|J\|^2)$, i.e.\ of a Gaussian prior
+$J\sim\mathcal N(0,\sigma^2)$ with $\frac1{2\sigma^2}=M\lambda_J$:
+\[
+\boxed{\;\lambda=\frac1{2\sigma^2M}\;}
+\]
+Our couplings have prior scale $\sigma^2\approx\sum_\ell(\sigma^{(\ell)}_J)^2\approx1$ on contacts, and
+$M=144{,}000$, so $\lambda\approx3.5\times10^{-6}$. We use $\lambda_h=\lambda_J=10^{-5}$ (a mild prior). The
+common plmDCA default $\lambda_J=0.01$ corresponds to $\sigma\approx0.02$ here and would shrink our strong
+couplings far too much.
+\end{itemize}
+
+\paragraph{Computing $\|J\|^2$ without building $J$.} Write $G^A_{hh'}=\sum_{ij}A^h_{ij}A^{h'}_{ij}$ and
+$G^V_{hh'}=\sum_{ab}V^h_{ab}V^{h'}_{ab}$. Then
+$\|\tilde J\|^2=\sum_{ij,ab}\big(\sum_hA^h_{ij}V^h_{ab}\big)^2=\sum_{h,h'}G^A_{hh'}G^V_{hh'}$: expand the square
+and swap the sums. For the symmetric part,
+$\|J\|^2=\frac12\|\tilde J\|^2+\frac12\langle\tilde J,\tilde J^{\top}\rangle$, and the cross term is the same
+formula with $A^{h'}_{ji}$ and $V^{h'}_{ba}$. These are $H\times H$ matrices instead of an
+$L^2q^2$-element tensor (\texttt{coupling\_norm2}, checked against the direct sum in \texttt{test\_08}).
+
+\subsection{Optimisation}
+Adam (learning rate $5\times10^{-3}$), minibatches of 512 sequences, at most 60 epochs. After each epoch
+we compute the pseudo-NLL per site on the validation set and keep the best epoch. Training stops if it has
+not improved for 8 epochs (early stopping). The test set plays no role.
+
+%------------------------------------------------------------------------------------------
+\section{The conditioned model: hierarchical tags}\label{sec:cond}
+%------------------------------------------------------------------------------------------
+\subsection{Parametrisation}
+Each training sequence carries three tags: family $f$, subfamily $s$, clade $c$ (global indices; $-1$ =
+``unspecified''). For a tag $\bm c=(f,s,c)$:
+\begin{equation}\label{eq:condparams}
+\boxed{\begin{aligned}
+h(\bm c)&=h+\Delta h^{\text{fam}}_f+\Delta h^{\text{sub}}_s+\Delta h^{\text{cl}}_c\\
+V^h(\bm c)&=V^h+\Delta V^{h,\text{fam}}_f+\Delta V^{h,\text{sub}}_s+\Delta V^{h,\text{cl}}_c\\
+J_{ij}(\bm c)&=\mathrm{sym}\Big(\textstyle\sum_hA^h_{ij}\,V^h(\bm c)\Big)
+\end{aligned}}
+\end{equation}
+Unspecified levels are simply left out. \textbf{The attention $A^h$ (i.e.\ $Q,K$) is shared by all labels.}
+It encodes \emph{which} pairs interact, the fold, which all our clades share (\S\ref{sec:contacts}). The labels
+change \emph{how} they interact ($V$) and which residues are preferred ($h$). This mirrors the ground truth,
+where all clades share one contact map and differ in the values of $h$ and $J$ on it. The label tables add
+$(3+9+18)\times(Lq+Hq^2)=3{,}108{,}000$ parameters, for $4{,}194{,}640$ in total.
+
+\paragraph{Hierarchical prior.} The ground truth was generated as parent $+$ Gaussian perturbation at each
+level. The matching prior is an L2 penalty on each label-specific part:
+$\lambda_{\text{label}}\sum_{\text{levels}}\big(\|\Delta h\|^2+\|\Delta J\|^2\big)$, where $\Delta J=\mathrm{sym}(\sum_hA^h\otimes\Delta V^h)$
+(computed with the same Gram trick). With $\sigma\approx0.2$ for the lower levels and the formula
+$\lambda=1/(2\sigma^2M)$, $\lambda_{\text{label}}\approx10^{-4}$.
+
+\subsection{Tag dropout: conditioning at any level}
+During training each sequence's tags are randomly removed, \emph{hierarchically}:
+\begin{itemize}[nosep]
+  \item with probability $0.10$ the family is removed, and then also subfamily and clade;
+  \item otherwise with probability $0.10$ the subfamily is removed (and the clade);
+  \item otherwise with probability $0.15$ the clade is removed.
+\end{itemize}
+So a clade tag never appears without its family (the combination would be meaningless). The marginal
+rates are 10\% no tag at all, 19\% family only, 16\% family+subfamily, and 55\% full tags. The model thus
+learns four kinds of model in one: unconditioned, family-level, subfamily-level and clade-level.
+\texttt{test\_09} checks the rates.
+
+\paragraph{What does ``family only'' mean?} Sequences tagged $(f,-1,-1)$ are a mixture of the 6 clades of
+family $f$. A mixture of Potts models is not a Potts model, so the family-level $(h,J)$ is the
+\emph{best single Potts approximation} (in the pseudo-likelihood sense) to that mixture. The same holds for
+the unconditioned model trained on all 18 clades, which must approximate a mixture of 18 models. A mixture
+has extra correlations. Every site whose preferred residue differs between clades becomes correlated with
+every other such site, and a single Potts model can only mimic this with extra, spread-out couplings.
+\textbf{We therefore expect the unconditioned model's $J$ not to equal any clade's $J$}, and its samples to
+reproduce $f_i$ well but $C_{ij}$ only partially. The conditioned model with full tags is the one that can
+be exact. Comparing the two quantifies what conditioning buys.
+
+%------------------------------------------------------------------------------------------
+\section{Generation and evaluation protocol}\label{sec:evalprotocol}
+%------------------------------------------------------------------------------------------
+For every label (unconditioned: one; conditioned: 18 clades $+$ 3 families):
+\begin{enumerate}[nosep]
+\item export $(h(\bm c),J(\bm c))$ from the network (a dense Potts model);
+\item Gibbs-sample as many sequences as the test set holds for that label (1000 per clade), 200 sweeps of
+      burn-in, one sequence per chain (GPU sampler);
+\item compare with the \textbf{test} sequences of that label.
+\end{enumerate}
+\begin{center}\small
+\begin{tabular}{p{0.28\linewidth}p{0.64\linewidth}}
+\toprule
+quantity & definition and what it tells\\
+\midrule
+$r_f$, $r_C$, slope, RMSE & \S\ref{sec:metric}; do the samples have the right frequencies and correlations?\\
+oracle $r_C$ & the same metric for \emph{fresh ground-truth} samples of the same size vs the test set, the best
+possible score (it is below 1 only because of finite samples). Target: generated $\approx$ oracle.\\
+identity, copies & mean identity generated--generated and generated--test; the fraction of generated sequences
+that are exact copies of a test sequence (should be $\approx0$: no memorisation)\\
+$r_J$ (contacts), rel.\ error & Pearson correlation and relative error $\|J^0-J^{0\star}\|/\|J^{0\star}\|$ between learned
+and true couplings, both in the zero-sum gauge, over all pairs and over true contacts; mean $|J|$ on non-contacts\\
+contact precision & fraction of true long-range contacts among the top-scoring pairs (next paragraph)\\
+cross-clade $r_C$ matrix & $r_C$ between generated clade $a$ and test clade $b$ for all $a,b$; \emph{assignment
+accuracy} = fraction of clades whose generated sequences match their own test clade best\\
+PCA & generated sequences projected on the \emph{reference} axes of Part~I, next to the test sequences\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Contact score (APC).} For each pair, $F_{ij}=\|J^0_{ij}\|_F$ (zero-sum gauge). Sites with many
+strong couplings inflate all their $F_{ij}$. The average-product correction removes this background:
+$F^{\text{APC}}_{ij}=F_{ij}-\bar F_{i\cdot}\bar F_{\cdot j}/\bar F_{\cdot\cdot}$ (bars are averages over
+$j\ne i$, $i\ne j$, and all pairs). We rank pairs with $|i-j|\ge4$ by $F^{\text{APC}}$ and report the
+fraction of true contacts among the top 120 (the number of true long-range contacts).
+
+\subsection{Distances between sequences and between sets of sequences}\label{sec:distances}
+The statistics above ($f_i$, $C_{ij}$) compare \emph{averages} over a set. The distances below look at
+individual sequences and at the \emph{shape} of the cloud of sequences. They answer three questions:
+are the generated sequences new (not copies)? Are they as diverse as real ones? Do they occupy the same
+region of sequence space?
+
+\paragraph{1. Hamming distance between two sequences.} The fraction of sites where two sequences differ:
+\begin{equation}\label{eq:hamming}
+\boxed{\;d_H(\s,\s')=\frac1L\sum_{i=1}^L\one[s_i\neq s'_i]\in[0,1]\;}
+\end{equation}
+It is $1-\mathrm{id}(\s,\s')$ (identity of \S\ref{sec:stats}). $d_H=0$ means identical sequences. Two
+independent uniformly random sequences have $\E\,d_H=1-1/q=0.95$. It is a true distance (symmetric, and
+$d_H(\s,\s'')\le d_H(\s,\s')+d_H(\s',\s'')$, since a site where $\s$ and $\s''$ differ must differ in at least
+one of the two steps). In code it is computed for many pairs at once from one-hot vectors: the number of equal
+sites is $\bm x^\top\bm x'$, so $d_H=1-\bm x^\top\bm x'/L$.
+
+\paragraph{2. Nearest-neighbour distance to the training set (novelty / memorisation).}
+\begin{equation}\label{eq:dnn}
+\boxed{\;d_{NN}(\s,\mathcal T)=\min_{\bm t\in\mathcal T}d_H(\s,\bm t)\;}
+\end{equation}
+with $\mathcal T$ the 144{,}000 training sequences. A model that memorised its training data generates
+sequences with $d_{NN}=0$ (exact copies) or very small $d_{NN}$. The right \emph{reference} is not 0 but the same
+quantity for real sequences the model never saw: the held-out test sequences, $d_{NN}(\bm r,\mathcal T)$.
+\textbf{A good generator has the same distribution of $d_{NN}$ as the test sequences}: its samples are exactly
+as novel as fresh real sequences. We report the means, the fraction of exact copies of a training sequence,
+and the distance $W_1$ (next paragraph) between the two distributions.
+
+\paragraph{3. Pairwise distance distributions (diversity).} For a set $G$ (generated) and a reference set $R$
+(test), draw random pairs and record $d_H$: $D_{GG}$ (both in $G$), $D_{RR}$ (both in $R$), $D_{GR}$ (one in each).
+\begin{itemize}[nosep]
+\item $\bar D_{GG}<\bar D_{RR}$: the generated sequences are too similar to each other (too little diversity, e.g.\
+      over-conserved); $\bar D_{GG}>\bar D_{RR}$: too diverse (too noisy).
+\item $D_{GR}$ vs $D_{RR}$: if $G$ and $R$ come from the same distribution, a generated--real pair looks like a
+      real--real pair, so the two distributions coincide.
+\end{itemize}
+To compare two distributions of distances with one number we use the \textbf{1-Wasserstein distance}. For
+one-dimensional samples with cumulative distribution functions $F$ and $F'$,
+\begin{equation}\label{eq:w1}
+W_1(F,F')=\int_{-\infty}^{\infty}\big|F(x)-F'(x)\big|\,dx ,
+\end{equation}
+the area between the two CDFs. It is the smallest average distance by which one must move the mass of one
+histogram to turn it into the other (``earth mover's distance''). For two samples of the same size it equals
+the mean absolute difference between the sorted values. It is expressed in the same unit as $d_H$ (fraction of
+sites): $W_1=0.01$ means the distributions are shifted by about 1\% of the sites.
+
+\paragraph{4. Distance between sets in PCA space: the Fréchet distance.} Project the sequences on the reference
+PCA axes of Part~I (10 components, \S\ref{sec:pca}). Each set becomes a cloud of points $\bm z\in\mathbb R^{10}$,
+summarised by its mean $\bm\mu$ and covariance $\Sigma$. The Fréchet distance between the two clouds is
+\begin{equation}\label{eq:frechet}
+\boxed{\;\mathrm{FD}(G,R)=\|\bm\mu_G-\bm\mu_R\|^2+\mathrm{Tr}\Big(\Sigma_G+\Sigma_R-2\big(\Sigma_G^{1/2}\Sigma_R\Sigma_G^{1/2}\big)^{1/2}\Big)\;}
+\end{equation}
+\emph{Where it comes from.} It is the squared 2-Wasserstein distance between the Gaussians
+$\mathcal N(\bm\mu_G,\Sigma_G)$ and $\mathcal N(\bm\mu_R,\Sigma_R)$, i.e.\ the smallest mean squared displacement
+needed to move one cloud onto the other. Two special cases make it readable. (i) Same covariance, shifted mean:
+$\Sigma_G=\Sigma_R=\Sigma$ gives $\mathrm{Tr}(2\Sigma-2(\Sigma^2)^{1/2})=0$, so $\mathrm{FD}=\|\bm\mu_G-\bm\mu_R\|^2$,
+the squared distance between the centres. (ii) Same mean, isotropic covariances $\sigma_G^2I$ and $\sigma_R^2I$ in $d$
+dimensions: $\mathrm{FD}=d(\sigma_G-\sigma_R)^2$, the mismatch of the spreads. In general FD is zero iff the means and
+covariances agree, and it penalises both a misplaced cloud and a cloud of the wrong size or shape. (The FID used for
+images is the same formula applied to network features.) \texttt{test\_12} checks both special cases numerically.
+
+\paragraph{How to read FD: a ladder from the ground truth.} Like $r_C$, FD computed from finite samples is not
+zero even for two samples of the same distribution. It is not a probability either, so a value needs a scale. We
+compute it between the \emph{test} sets of pairs of clades, grouped by their relation, and between the oracle and
+the test set of the same clade:
+same clade (oracle, the floor) $<$ sibling clade $<$ same family $<$ different family. A generated clade is then
+placed on this ladder (\S\ref{sec:res_dist}). As with $r_C$, we also compute the full generated-clade $\times$
+test-clade FD matrix. The \emph{FD assignment accuracy} is the fraction of generated clades whose closest test
+clade is their own.
+
+%------------------------------------------------------------------------------------------
+\section{Tests of Part II}\label{sec:p2tests}
+%------------------------------------------------------------------------------------------
+\begin{center}\small
+\begin{tabular}{p{0.3\linewidth}p{0.62\linewidth}}
+\toprule
+test & what it verifies\\
+\midrule
+\texttt{test\_06\_torch\_sampling} & GPU sampler: energy $=$ numpy energy; $L=3,q=3$ vs exact (TV $<0.02$); same frequencies as the numpy sampler\\
+\texttt{test\_07\_data} & top-up gives exactly $n$ per clade with correct labels and keeps existing sequences; split disjoint, complete, stratified, reproducible; global tag indices\\
+\texttt{test\_08\_factored\_attention} & attention rows sum to 1, $A_{ii}=0$; $J$ symmetric; \textbf{logits $=$ Potts local fields} and pseudo-NLL $=$ $-\sum\log P(s_i|\s_{-i})$ of the exported model; Gram-trick norm $=$ direct norm; save/load; \textbf{learns a toy model} (next figure)\\
+\texttt{test\_09\_conditional} & label parameters compose as in \eqref{eq:condparams}; mixed-label batches $=$ per-label computation; tag dropout is hierarchical with the right rates; \textbf{a clade tag selects the clade} (next figure)\\
+\texttt{test\_10\_evaluation} & contact precision by hand; the true model finds all its contacts; $J$ recovery is gauge-invariant; copy detection\\
+\texttt{test\_11\_model\_pipeline} & the whole chain s01$\to$s08 for both models on a tiny tree\\
+\texttt{test\_12\_distances} & Hamming distances by hand; nearest-neighbour distance (copies give 0, the self-pair can be excluded); random sequences differ at $1-1/q$ of sites; Fréchet distance on Gaussians with known answers (shift: $\|\Delta\mu\|^2$, scale: $d(\sigma_1-\sigma_2)^2$); copy detection\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{tests/test_08_factored_attention/test_learns_single_contact/toy_single_contact.png}
+\caption{\texttt{test\_08}: toy model with $L=6$, $q=3$ and a single strong coupling between sites 0 and 3,
+10{,}000 samples, $H=4$ heads. Left: training curve. Middle: the learned $\|J_{ij}\|$ is concentrated on
+the true pair. Right: learned vs true $J_{03}(a,b)$ and $h_i(a)$ (zero-sum gauge), $r=1.000$ and $0.995$.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.62\linewidth]{tests/test_09_conditional/test_learns_clade_specific_fields/site2_by_tag.png}
+\caption{\texttt{test\_09}: two clades that prefer residue 0 vs residue 2 at site 2. Sequences generated
+with each clade tag reproduce that clade's frequencies (black ticks). With the clade tag dropped (family
+only) the model generates the mixture.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{tests/test_11_model_pipeline/test_model_pipeline_tiny/figures/models/tiny_conditional/pca_generated_vs_test.png}
+\caption{\texttt{test\_11}: the full pipeline on a tiny tree ($L=15$, $q=5$, 8 clades) after only 4
+epochs. Sequences generated with each clade tag already sit on the test sequences of their family and
+subfamily on the reference PCA.}
+\end{figure}
+
+%------------------------------------------------------------------------------------------
+\input{part2_results_uncond.tex}
+
+\input{part2_results_cond.tex}
+
+\input{part2_results_distances.tex}
+
+\input{part2_results_H256.tex}
+
+%------------------------------------------------------------------------------------------
+\section{Training plan}\label{sec:plan}
+%------------------------------------------------------------------------------------------
+\input{part2_plan.tex}

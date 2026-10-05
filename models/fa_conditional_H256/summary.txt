@@ -1,0 +1,15 @@
+ConditionalFactoredAttentionPotts  (L=60, q=20, heads H=256, key dim d=32)
+  input   : S (batch, L) integers in [0, q)  -> one-hot (batch, L*q)
+  Q, K    : (H, L, d) = (256, 60, 32)   positional, residue-independent   [983,040 params]
+  A       : softmax_j(Q K^T / sqrt(d)), A_ii = 0  -> (H, L, L)
+  V       : (H, q, q) = (256, 20, 20)   [102,400 params]
+  h       : (L, q) = (60, 20)   [1,200 params]
+  J       : sym( sum_h A^h (x) V^h ) -> (L, L, q, q) = (60, 60, 20, 20)
+  tags    : (batch, 3) = [family, subfamily, clade] global ids, -1 = unspecified
+  labels  : dh (L, q) and dV (H, q, q) per family (3), subfamily (9), clade (18)  [3,108,000 params]
+  h(c), V(c) = base + sum over specified levels;  J(c) = sym( sum_h A^h (x) V^h(c) )
+  output  : logits (batch, L, q),  logits_i(a) = h_i(a) + sum_j J_ij(a, s_j)
+  loss    : pseudo-NLL  sum_i -log softmax(logits_i)(s_i)  + lam_h||h||^2 + lam_J||J||^2 + lam_label (||dh||^2 + ||dJ||^2)
+  total trainable parameters: 4,194,640
+
+train sequences: 144000, val sequences: 18000

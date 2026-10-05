@@ -1,0 +1,10 @@
+[project]
+name = "psg"
+version = "0.1.0"
+description = "Learning hierarchical Potts models: Potts ground truth, factored attention and masked diffusion"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "matplotlib", "torch"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

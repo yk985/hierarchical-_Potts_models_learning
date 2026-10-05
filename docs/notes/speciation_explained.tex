@@ -1,0 +1,275 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\newtcolorbox{keybox}[1]{colback=blue!3,colframe=blue!45!black,title={#1},fonttitle=\bfseries,boxrule=0.6pt}
+\newcommand{\E}{\mathbb{E}}
+
+\title{\textbf{Speciation in masked diffusion, step by step}\\[3pt]
+\large Companion note to Part IV, \S33.2 of \texttt{modelization.pdf}}
+\date{28 September 2026}
+
+\begin{document}
+\maketitle
+
+\noindent This note answers four questions about \S33.2:
+\begin{enumerate}[nosep]
+\item What exactly is $U$, what is $x_U$, and what does ``average over $x_U$'' mean? (\S1)
+\item What does the procedure look like on a short sequence? (\S2)
+\item Where do the profiles $f$ come from, and why is it called ``profile Bayes''? (\S3, \S4)
+\item Can the couplings explain why the network's subfamily and clade speciation times differ from the theory? (\S5)
+\end{enumerate}
+
+%=====================================================================
+\section{The objects, one by one}
+%=====================================================================
+\begin{itemize}[nosep]
+\item $x_0=(x_0^1,\dots,x_0^L)$: a complete sequence of $L$ sites. Each site holds one of $q$ residues ($q=20$ in the
+project).
+\item $k$: the \textbf{number of revealed sites}, $0\le k\le L$.
+\item $U\subset\{1,\dots,L\}$: the \textbf{set of revealed sites}, with $|U|=k$. The complement $M$ is the set of
+hidden (masked) sites.
+\item $x_U=(x_0^i)_{i\in U}$: the \textbf{revealed part}. It records \emph{which} sites are shown and \emph{what}
+residue each one holds. Example with $L=4$ and $U=\{1,4\}$: the partial sequence $A\,?\,?\,A$.
+\item $y(x)$: a \textbf{label} of a complete sequence (its family, subfamily or clade).
+\item $P(y\mid x_U)$: the probability that the complete sequence has label $y$, knowing only the revealed part.
+\end{itemize}
+
+\paragraph{Why $x_U$ is random.} A partial sequence is produced by two independent random choices:
+\begin{enumerate}[nosep]
+\item \textbf{which sequence}: $x_0$ is drawn from the data distribution $P$;
+\item \textbf{which sites}: $U$ is drawn uniformly among the $\binom Lk$ subsets of size $k$, \emph{independently of
+$x_0$}. This is what masking does: it hides sites at random without looking at the residues.
+\end{enumerate}
+The commitment averages over both choices:
+\begin{equation}\label{eq:phi}
+\phi_k=\E_{x_0\sim P}\,\E_U\Big[\sum_yP(y\mid x_{0,U})^2\Big]
+=\sum_{x_0}P(x_0)\,\frac1{\binom Lk}\sum_{U:\,|U|=k}\ \sum_yP(y\mid x_{0,U})^2 .
+\end{equation}
+The inner term $\sum_yP(y\mid x_U)^2$ is the probability that \emph{two} clones started from this particular partial
+sequence end with the same label. Given $x_U$ the two clones are independent, and both land on $y$ with probability
+$P(y\mid x_U)^2$. $\phi_k$ is its average over all partial sequences with $k$ revealed sites, each weighted by how often
+masking produces it.
+
+\paragraph{With $C$ clones.} All $C$ clones agree with probability $\sum_yP(y\mid x_U)^C$. The code does \emph{not} use
+that quantity. It averages agreement over the $\binom C2$ pairs of clones, and each pair has expectation
+$\sum_yP(y\mid x_U)^2$. So 8 clones estimate the same $\phi_k$ as 2 clones, with less noise.
+
+%=====================================================================
+\section{A small example you can check by hand}
+%=====================================================================
+Take $L=4$, two residues $\{A,B\}$, and two classes with prior $1/2$ each. For this example only, assume the sites are
+independent within a class. The probability of residue $A$ at each site is
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+site $i$ & 1 & 2 & 3 & 4\\
+\midrule
+class 1: $f_{1,i}(A)$ & 0.9 & 0.8 & 0.5 & 0.6\\
+class 2: $f_{2,i}(A)$ & 0.1 & 0.3 & 0.5 & 0.4\\
+\bottomrule
+\end{tabular}
+\end{center}
+and $f_{c,i}(B)=1-f_{c,i}(A)$. Site 1 is very informative about the class; site 3 carries no information at all.
+
+\paragraph{One sequence, all masks.} Take $x_0=AABA$ and $k=2$. There are $\binom42=6$ equally likely sets $U$. For each
+one we compute the two class likelihoods, the posterior of class 1 (equal priors, so
+$P(1\mid x_U)=P(x_U\mid1)/[P(x_U\mid1)+P(x_U\mid2)]$), and the two-clone agreement:
+\begin{center}
+\begin{tabular}{cccccc}
+\toprule
+$U$ & partial sequence & $P(x_U\mid1)$ & $P(x_U\mid2)$ & $P(1\mid x_U)$ & $\sum_yP(y\mid x_U)^2$\\
+\midrule
+$\{1,2\}$ & $A\,A\,?\,?$ & $0.9\times0.8=0.720$ & $0.1\times0.3=0.030$ & 0.960 & 0.923\\
+$\{1,3\}$ & $A\,?\,B\,?$ & $0.9\times0.5=0.450$ & $0.1\times0.5=0.050$ & 0.900 & 0.820\\
+$\{1,4\}$ & $A\,?\,?\,A$ & $0.9\times0.6=0.540$ & $0.1\times0.4=0.040$ & 0.931 & 0.872\\
+$\{2,3\}$ & $?\,A\,B\,?$ & $0.8\times0.5=0.400$ & $0.3\times0.5=0.150$ & 0.727 & 0.603\\
+$\{2,4\}$ & $?\,A\,?\,A$ & $0.8\times0.6=0.480$ & $0.3\times0.4=0.120$ & 0.800 & 0.680\\
+$\{3,4\}$ & $?\,?\,B\,A$ & $0.5\times0.6=0.300$ & $0.5\times0.4=0.200$ & 0.600 & 0.520\\
+\bottomrule
+\end{tabular}
+\end{center}
+Averaging the last column over the 6 subsets gives $0.736$: the commitment of \emph{this} sequence at $k=2$. It depends
+strongly on the mask. It is 0.92 when site 1 is revealed, and only 0.52 when the two revealed sites are the uninformative
+sites 3 and 4. The full $\phi_2$ of eq.~\eqref{eq:phi} repeats this for every possible $x_0$ and weights each by $P(x_0)$.
+
+\paragraph{What cloning does, on one row.} Start from $A\,A\,?\,?$. Each clone
+\begin{enumerate}[nosep]
+\item draws a class $c\sim P(c\mid x_U)=(0.96,\,0.04)$;
+\item fills site 3 from $f_{c,3}$ and site 4 from $f_{c,4}$.
+\end{enumerate}
+Two clones share a class with probability $0.96^2+0.04^2=0.923$, the last column of that row. (The diffusion network
+does the same thing without knowing the classes. It reveals the hidden sites one at a time from its learned conditionals,
+and the classifier labels the completed sequence afterwards.)
+
+\paragraph{How the code estimates the double average.} Enumeration is impossible for $L=60$, so the code uses Monte Carlo:
+\begin{itemize}[nosep]
+\item it takes 1000 test sequences: 1000 draws of $x_0$;
+\item it gives each one a random reveal order, and $U$ is the first $k$ sites of that order: one draw of $U$ per
+sequence, for every $k$;
+\item it completes each partial sequence 8 times, labels the clones, measures pair agreement, and averages over the
+1000 sequences.
+\end{itemize}
+
+%=====================================================================
+\section{Where the profiles $f$ come from}
+%=====================================================================
+For class $c$, site $i$ and residue $a$:
+\[
+f_{c,i}(a)=\frac{\#\{\text{training sequences of class }c\text{ with residue }a\text{ at site }i\}}
+{\#\{\text{training sequences of class }c\}},
+\]
+with a pseudo-count of $10^{-3}$ added before normalising, so that no entry is zero. The table $(f_{c,i})_{i=1,\dots,L}$ is
+the class's \textbf{profile} (a position-specific frequency table). The \textbf{profile model} pretends that sites are
+independent within a class:
+\[
+P_{\rm prof}(x\mid c)=\prod_{i=1}^Lf_{c,i}(x^i).
+\]
+This is an approximation. The true clade models are Potts models, whose couplings $J_{ij}$ correlate the sites.
+
+\paragraph{Why the revealed part is easy under the profile model.} The likelihood of the revealed residues is the
+probability of the complete sequence summed over every value of the hidden sites:
+\[
+P_{\rm prof}(x_U\mid c)=\sum_{x_M}\ \prod_{i\in U}f_{c,i}(x^i)\prod_{j\in M}f_{c,j}(x^j)
+=\prod_{i\in U}f_{c,i}(x^i)\ \prod_{j\in M}\underbrace{\Big(\sum_af_{c,j}(a)\Big)}_{=1}
+=\prod_{i\in U}f_{c,i}(x^i).
+\]
+Each hidden site sums to 1, so hidden sites simply drop out. This is exactly what the table of \S2 used.
+
+\paragraph{Why the true posterior cannot be computed.} For the Potts model of class $c$,
+\[
+P_c(x_U)=\frac1{Z_c}\sum_{x_M}e^{-E_c(x_U,\,x_M)} .
+\]
+The couplings link revealed and hidden sites, so the sum does not factorise. It has $q^{|M|}$ terms (up to $20^{60}$),
+and it also needs the partition function $Z_c$. The profile model is the tractable substitute.
+
+%=====================================================================
+\section{Profile Bayes and the class log-odds}
+%=====================================================================
+\paragraph{Profile Bayes.} Bayes' rule with the profile likelihood and prior $\pi_c$:
+\[
+P_{\rm prof}(c\mid x_U)=\frac{\pi_c\prod_{i\in U}f_{c,i}(x^i)}{\sum_{c'}\pi_{c'}\prod_{i\in U}f_{c',i}(x^i)} .
+\]
+``Profile Bayes'' means Bayes' rule applied with the profile likelihood. The theory curves in Part IV evaluate
+eq.~\eqref{eq:phi} with this posterior in place of the true one, by Monte Carlo on 5000 test sequences.
+
+\paragraph{The log-odds, step by step.} Take two classes $c,c'$ with equal priors. In the ratio of the two posteriors the
+denominator cancels:
+\[
+\Lambda=\log\frac{P_{\rm prof}(c\mid x_U)}{P_{\rm prof}(c'\mid x_U)}
+=\log\frac{\prod_{i\in U}f_{c,i}(x^i)}{\prod_{i\in U}f_{c',i}(x^i)}
+=\sum_{i\in U}r_i(x^i),\qquad r_i(a)=\log\frac{f_{c,i}(a)}{f_{c',i}(a)} .
+\]
+So the log-odds is \textbf{a sum of one term per revealed site}, and each term depends only on the two profiles at that
+site. That is where the dependence on $f$ comes from.
+
+\emph{Check on the example, row $\{1,2\}$:} $r_1(A)=\log(0.9/0.1)=2.197$ and $r_2(A)=\log(0.8/0.3)=0.981$, so
+$\Lambda=3.178$ and $P(1\mid x_U)=1/(1+e^{-3.178})=0.960$, as in the table.
+
+\paragraph{The mean of $\Lambda$.} Let the sequence come from class $c$.
+\begin{enumerate}[nosep]
+\item At a fixed site $i$ the residue is drawn from $f_{c,i}$, so the average of that site's term is
+\[
+\E_{a\sim f_{c,i}}\big[r_i(a)\big]=\sum_af_{c,i}(a)\log\frac{f_{c,i}(a)}{f_{c',i}(a)}=\mathrm{KL}\big(f_{c,i}\,\|\,f_{c',i}\big).
+\]
+\item Each site belongs to $U$ with probability $k/L$, independently of its residue.
+\item Summing the contributions of all sites:
+\[
+\mu_k=\E\Lambda=\frac kL\sum_{i=1}^L\mathrm{KL}\big(f_{c,i}\,\|\,f_{c',i}\big)=\frac kL\,D .
+\]
+\end{enumerate}
+$D$ is the total information that a complete sequence carries about ``$c$ rather than $c'$''. Revealing a fraction $k/L$
+of the sites gives, on average, that fraction of it.
+
+\emph{Example:} the KL divergence is 1.758 at site 1, 0.534 at site 2, 0 at site 3 and 0.081 at site 4, so $D=2.37$ and
+$\mu_2=\tfrac24\times2.37=1.19$.
+
+\paragraph{From $\mu$ to a speciation time.} When many weakly informative sites are revealed, $\Lambda$ is approximately
+Gaussian with variance $2\mu_k$ (derived in \S33.2 of the main document). The normalised commitment is then the universal
+function $\Psi(\mu)=\E[\tanh^2(\Lambda/2)]$, which crosses $1/2$ at $\mu^\star=1.70$. Hence
+\[
+k_S=\frac{L\mu^\star}{D}.
+\]
+In the project the sibling divergences are $D=64.5,\ 23.5,\ 10.4$ nats (family, subfamily, clade). That gives
+$k_S=1.6,\ 4.4,\ 9.8$ revealed sites: the family is decided first, the clade last.
+
+%=====================================================================
+\section{Do the couplings explain the gap at subfamily and clade level?}
+%=====================================================================
+The measured speciation points ($k_S$ where the normalised commitment crosses $1/2$) are:
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+ & family & subfamily & clade\\
+\midrule
+profile Bayes (theory) & 2.1 & 4.9 & 8.1\\
+network clones & 2.0 & 5.7 & 16.0\\
+\bottomrule
+\end{tabular}
+\end{center}
+Couplings affect the profile theory in two \emph{opposite} ways.
+\begin{enumerate}[nosep]
+\item \textbf{Missing information.} Clades also differ in their couplings $J$. A pair of revealed residues that are in
+contact carries class information that the profile never uses. On its own, this would make the true commitment
+\emph{higher} than the profile's, and speciation earlier.
+\item \textbf{Double counting.} Within a class, residues in contact are correlated, so two of them partly repeat the same
+evidence. The profile adds both terms $r_i$ as if they were independent. On its own, this makes the profile posterior
+\emph{over-confident}, and its speciation too early.
+\end{enumerate}
+
+\paragraph{A test that decides which effect wins.} If $Q(y\mid x_U)$ were the true posterior, then
+\[
+\E\Big[\sum_yQ(y\mid x_U)^2\Big]=\E\big[Q(\text{true class}\mid x_U)\big].
+\]
+The left side is the probability that two independent draws from $Q$ agree. The right side is the probability that a
+draw from $Q$ agrees with the true label, which is itself a draw from the true posterior $P$. When $Q=P$ the two are the
+same quantity. The left side is what the theory curve plots; the right side needs the true labels.
+If the left side is larger, $Q$ is over-confident. The same test applied to the network is
+clone--clone agreement against clone--true-label agreement. On 5000 test sequences:
+\begin{center}\small
+\begin{tabular}{llcccc}
+\toprule
+ & & \multicolumn{2}{c}{profile posterior} & \multicolumn{2}{c}{network clones}\\
+level & $k$ & $\E\sum_yQ^2$ (plotted) & $\E\,Q(\text{true})$ & clone--clone & clone--true\\
+\midrule
+family & 5 & 0.873 & 0.873 & 0.871 & 0.879\\
+family & 20 & 0.997 & 0.996 & 0.999 & 0.999\\
+\midrule
+subfamily & 5 & 0.559 & 0.553 & 0.515 & 0.529\\
+subfamily & 20 & 0.908 & 0.884 & 0.861 & 0.890\\
+\midrule
+clade & 5 & 0.381 & 0.370 & 0.290 & 0.317\\
+clade & 10 & 0.605 & 0.562 & 0.430 & 0.479\\
+clade & 20 & 0.796 & 0.728 & 0.576 & 0.646\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Reading the table.}
+\begin{itemize}[nosep]
+\item \textbf{Family:} the two profile columns are equal, so the profile is calibrated. Family differences (64 nats) are
+large compared with the correlations. Theory and network agree ($k_S\approx2$).
+\item \textbf{Subfamily and clade:} the plotted profile column is too high, and increasingly so as $k$ grows (0.796
+against 0.728 at $k=20$ for clades). \emph{Double counting wins}, so the profile's $k_S$ (4.9 and 8.1) is \textbf{too
+early}.
+\item \textbf{Why the error grows with $k$:} among $k$ random revealed sites, the expected number of pairs in contact is
+$\binom k2\times\frac{179}{1770}$. That is $0.3$ at $k=3$, $2.8$ at $k=8$ and $12$ at $k=16$. For $k\le3$ almost no revealed
+pair is in contact, which is why the profile agrees with the data-only estimate there.
+\item \textbf{The network is under-confident:} its clone--clone agreement is \emph{below} its clone--true agreement. This
+test uses no theory at all. So the network's $k_S$ (5.7 and 16) is \textbf{too late}: its completions are spread too
+evenly over sibling subfamilies and clades.
+\end{itemize}
+
+\begin{keybox}{Answer}
+Yes, couplings explain part of the disparity, but on the \emph{theory} side. Ignoring them makes the profile
+theory over-confident at subfamily and clade level, so it predicts speciation too early. The network is separately
+under-confident, so it speciates too late. The true clade speciation lies between the two, roughly at $k\approx9$--$10$
+(from the calibrated column), against 8.1 for the profile theory and 16 for the network.
+\end{keybox}
+
+\end{document}

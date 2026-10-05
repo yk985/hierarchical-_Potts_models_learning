@@ -1,0 +1,32 @@
+ConditionalFactoredAttentionPotts  (L=60, q=20, heads H=256, key dim d=32)
+  input   : S (batch, L) integers in [0, q)  -> one-hot (batch, L*q)
+  Q, K    : (H, L, d) = (256, 60, 32)   positional, residue-independent   [983,040 params]
+  A       : softmax_j(Q K^T / sqrt(d)), A_ii = 0  -> (H, L, L)
+  V       : (H, q, q) = (256, 20, 20)   [102,400 params]
+  h       : (L, q) = (60, 20)   [1,200 params]
+  J       : sym( sum_h A^h (x) V^h ) -> (L, L, q, q) = (60, 60, 20, 20)
+  tags    : (batch, 3) = [family, subfamily, clade] global ids, -1 = unspecified
+  labels  : dh (L, q) and dV (H, q, q) per family (3), subfamily (9), clade (18)  [3,108,000 params]
+  h(c), V(c) = base + sum over specified levels;  J(c) = sym( sum_h A^h (x) V^h(c) )
+  output  : logits (batch, L, q),  logits_i(a) = h_i(a) + sum_j J_ij(a, s_j)
+  loss    : pseudo-NLL  sum_i -log softmax(logits_i)(s_i)  + lam_h||h||^2 + lam_J||J||^2 + lam_label (||dh||^2 + ||dJ||^2)
+  total trainable parameters: 4,194,640
+epoch   0  loss 77.0762  train pNLL/site 1.2548  val pNLL/site 0.9199  (23.4s)
+epoch   1  loss 58.0431  train pNLL/site 0.9255  val pNLL/site 0.8994  (51.5s)
+epoch   2  loss 56.4385  train pNLL/site 0.9002  val pNLL/site 0.8931  (89.5s)
+epoch   3  loss 55.6406  train pNLL/site 0.8881  val pNLL/site 0.8957  (119.6s)
+epoch   4  loss 55.1224  train pNLL/site 0.8804  val pNLL/site 0.8950  (191.5s)
+epoch   5  loss 54.7361  train pNLL/site 0.8745  val pNLL/site 0.8903  (254.2s)
+epoch   6  loss 54.4291  train pNLL/site 0.8697  val pNLL/site 0.8901  (317.5s)
+epoch   7  loss 54.1662  train pNLL/site 0.8655  val pNLL/site 0.8925  (380.5s)
+epoch   8  loss 53.9611  train pNLL/site 0.8622  val pNLL/site 0.8934  (434.9s)
+epoch   9  loss 53.7573  train pNLL/site 0.8589  val pNLL/site 0.8967  (493.6s)
+epoch  10  loss 53.6287  train pNLL/site 0.8568  val pNLL/site 0.8884  (554.6s)
+epoch  11  loss 53.4688  train pNLL/site 0.8542  val pNLL/site 0.8899  (616.2s)
+epoch  12  loss 53.3767  train pNLL/site 0.8525  val pNLL/site 0.8929  (677.6s)
+epoch  13  loss 53.2368  train pNLL/site 0.8502  val pNLL/site 0.8903  (738.9s)
+epoch  14  loss 53.1672  train pNLL/site 0.8490  val pNLL/site 0.8912  (800.3s)
+epoch  15  loss 53.0752  train pNLL/site 0.8474  val pNLL/site 0.8888  (861.7s)
+epoch  16  loss 52.9895  train pNLL/site 0.8460  val pNLL/site 0.8912  (923.1s)
+epoch  17  loss 52.9165  train pNLL/site 0.8447  val pNLL/site 0.8943  (986.7s)
+epoch  18  loss 52.8262  train pNLL/site 0.8432  val pNLL/site 0.8962  (1057.9s)

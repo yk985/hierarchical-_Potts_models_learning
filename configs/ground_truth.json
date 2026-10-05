@@ -1,0 +1,43 @@
+{
+  "hierarchy": {
+    "L": 60,
+    "q": 20,
+    "n_families": 3,
+    "n_subfamilies": 3,
+    "n_clades": 2,
+    "sigma_h": [
+      1.5,
+      0.9,
+      0.5,
+      0.3
+    ],
+    "sigma_J": [
+      0.8,
+      0.45,
+      0.27,
+      0.15
+    ],
+    "n_long_contacts": 120,
+    "min_separation": 4,
+    "seed": 0
+  },
+  "sampling": {
+    "n_per_clade": 2000,
+    "n_burnin": 200,
+    "beta": 1.0,
+    "seed": 1
+  },
+  "analysis": {
+    "n_components": 10
+  },
+  "dataset": {
+    "n_per_clade": 10000,
+    "n_burnin": 200,
+    "fractions": [
+      0.8,
+      0.1,
+      0.1
+    ],
+    "seed": 100
+  }
+}

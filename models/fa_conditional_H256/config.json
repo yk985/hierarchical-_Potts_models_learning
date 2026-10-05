@@ -1,0 +1,29 @@
+{
+  "run_name": "fa_conditional_H256",
+  "model": {
+    "class": "ConditionalFactoredAttentionPotts",
+    "n_heads": 256,
+    "d_k": 32,
+    "init_v": 0.01,
+    "seed": 0
+  },
+  "train": {
+    "epochs": 60,
+    "batch_size": 512,
+    "lr": 0.005,
+    "lam_h": 1e-05,
+    "lam_J": 1e-05,
+    "lam_label": 0.0001,
+    "tag_dropout": [
+      0.1,
+      0.1,
+      0.15
+    ],
+    "patience": 8,
+    "seed": 0
+  },
+  "sampling": {
+    "n_burnin": 200,
+    "seed": 7
+  }
+}

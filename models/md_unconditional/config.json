@@ -1,0 +1,36 @@
+{
+  "run_name": "md_unconditional",
+  "model": {
+    "class": "MaskedDiffusionTransformer",
+    "d_model": 256,
+    "n_layers": 6,
+    "n_heads": 8,
+    "d_ff": 1024,
+    "dropout": 0.0,
+    "seed": 0
+  },
+  "train": {
+    "epochs": 150,
+    "batch_size": 256,
+    "lr": 0.0003,
+    "weight_decay": 0.0,
+    "warmup_steps": 1000,
+    "grad_clip": 1.0,
+    "ema_decay": 0.999,
+    "val_repeats": 4,
+    "patience": 15,
+    "seed": 0,
+    "amp": true
+  },
+  "sampling": {
+    "n_steps": [
+      15,
+      60,
+      240
+    ],
+    "continuous_time": true,
+    "seed": 7,
+    "n_burnin_oracle": 200,
+    "amp": true
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "run": "fa_unconditional_H256",
+  "n_test": 18000,
+  "all_clades": {
+    "generated_vs_test": {
+      "pearson_f1": 0.905455756003284,
+      "rmse_f1": 0.04752105846824529,
+      "pearson_C": 0.854767612872563,
+      "rmse_C": 0.0020148431557735014,
+      "slope_C": 0.5940046281968426,
+      "identity_gen_gen": 0.284496046508527,
+      "identity_ref_ref": 0.19797458565009268,
+      "identity_gen_ref": 0.21996933333333332,
+      "fraction_copies_of_reference": 0.0
+    },
+    "oracle_vs_test": {
+      "pearson_f1": 0.9997653996422655,
+      "rmse_f1": 0.0018599816915776655,
+      "pearson_C": 0.9938195341128012,
+      "rmse_C": 0.00041193729628536785,
+      "slope_C": 0.9899043269610992,
+      "identity_gen_gen": 0.19740156272917583,
+      "identity_ref_ref": 0.19797458565009268,
+      "identity_gen_ref": 0.19812466666666667,
+      "fraction_copies_of_reference": 0.0
+    },
+    "generated_rebalanced_vs_test": {
+      "pearson_f1": 0.9925764232619575,
+      "rmse_f1": 0.010937347482840861,
+      "pearson_C": 0.9517538886826357,
+      "rmse_C": 0.0011889433129846682,
+      "slope_C": 0.8179373523858372,
+      "identity_gen_gen": 0.2062026202620262,
+      "identity_ref_ref": 0.19797458565009268,
+      "identity_gen_ref": 0.20101833333333333,
+      "fraction_copies_of_reference": 0.0,
+      "n": 6009
+    },
+    "test_subsample_same_size_vs_test": {
+      "pearson_f1": 0.9997710332974925,
+      "rmse_f1": 0.0018413870951987882,
+      "pearson_C": 0.9936456274048786,
+      "rmse_C": 0.00041907440615285833,
+      "slope_C": 0.9967719544438401,
+      "identity_gen_gen": 0.19656298963229657,
+      "identity_ref_ref": 0.19797458565009268,
+      "identity_gen_ref": 0.19773133333333334,
+      "fraction_copies_of_reference": 1.0,
+      "n": 6009
+    }
+  },
+  "parameters": {
+    "vs_root_model": {
+      "pearson_J_all_pairs": 0.6791257725542361,
+      "pearson_h": 0.8492758244693172,
+      "rel_error_J": 0.7677873452777841,
+      "pearson_J_contacts": 0.7270912371357217,
+      "slope_J_contacts": 0.6141421669093816,
+      "mean_abs_J_non_contacts": 0.06462256695156629
+    },
+    "vs_mean_of_clade_models": {
+      "pearson_J_all_pairs": 0.7199749536707083,
+      "pearson_h": 0.8977601278668744,
+      "rel_error_J": 0.7067544968853159,
+      "pearson_J_contacts": 0.770825524412509,
+      "slope_J_contacts": 0.6145980948444064,
+      "mean_abs_J_non_contacts": 0.06462256695156629
+    },
+    "contact_precision_long_range": 1.0
+  },
+  "family_proportions": {
+    "test": {
+      "F0": 0.3303333333333333,
+      "F1": 0.327,
+      "F2": 0.3328888888888889,
+      "between": 0.009777777777777778
+    },
+    "oracle": {
+      "F0": 0.3305,
+      "F1": 0.32705555555555554,
+      "F2": 0.33294444444444443,
+      "between": 0.0095
+    },
+    "generated": {
+      "F0": 0.11055555555555556,
+      "F1": 0.12738888888888888,
+      "F2": 0.7593333333333333,
+      "between": 0.0027222222222222222
+    }
+  },
+  "per_family_after_assignment": {
+    "F0": {
+      "pearson_f1": 0.9734490732841095,
+      "rmse_f1": 0.02373576831131149,
+      "pearson_C": 0.7669547151707121,
+      "rmse_C": 0.0017115809603356763,
+      "slope_C": 0.6103945527537809,
+      "identity_gen_gen": 0.23799837238931915,
+      "identity_ref_ref": 0.26135615031738413,
+      "identity_gen_ref": 0.24431066666666668,
+      "fraction_copies_of_reference": 0.0,
+      "n_generated": 2003
+    },
+    "F1": {
+      "pearson_f1": 0.9789621640212982,
+      "rmse_f1": 0.01970502777138811,
+      "pearson_C": 0.8256919920204167,
+      "rmse_C": 0.0015521377477642614,
+      "slope_C": 0.6988465695778393,
+      "identity_gen_gen": 0.224983657514875,
+      "identity_ref_ref": 0.23578439216941377,
+      "identity_gen_ref": 0.226962,
+      "fraction_copies_of_reference": 0.0,
+      "n_generated": 2315
+    },
+    "F2": {
+      "pearson_f1": 0.9951543323472529,
+      "rmse_f1": 0.012305939835237584,
+      "pearson_C": 0.9034452076483165,
+      "rmse_C": 0.0009452446896358797,
+      "slope_C": 0.7600454096605506,
+      "identity_gen_gen": 0.3564419243436404,
+      "identity_ref_ref": 0.36273370405931615,
+      "identity_gen_ref": 0.358131,
+      "fraction_copies_of_reference": 0.0,
+      "n_generated": 13682
+    }
+  },
+  "distances": {
+    "generated_vs_test": {
+      "nn_to_train_generated_mean": 0.3840527437561088,
+      "nn_to_train_reference_mean": 0.3784870030780633,
+      "nn_to_train_W1": 0.007017592668533326,
+      "fraction_copies_of_train": 0.0,
+      "pairwise_within_generated_mean": 0.7155039534914731,
+      "pairwise_within_reference_mean": 0.8032227311212892,
+      "pairwise_generated_reference_mean": 0.7824623333333335,
+      "W1_within_generated_vs_within_reference": 0.08771877762981611,
+      "W1_cross_vs_within_reference": 0.02076039785462376,
+      "frechet_pca": 3.5190263359000147
+    },
+    "oracle_vs_test": {
+      "nn_to_train_generated_mean": 0.37792959579163127,
+      "nn_to_train_reference_mean": 0.3784870030780633,
+      "nn_to_train_W1": 0.0007962961263126775,
+      "fraction_copies_of_train": 0.0,
+      "pairwise_within_generated_mean": 0.8025984372708241,
+      "pairwise_within_reference_mean": 0.8032227311212892,
+      "pairwise_generated_reference_mean": 0.8030646666666668,
+      "W1_within_generated_vs_within_reference": 0.0013814702937791146,
+      "W1_cross_vs_within_reference": 0.0005930230737948097,
+      "frechet_pca": 0.0013091559623920758
+    }
+  }
+}

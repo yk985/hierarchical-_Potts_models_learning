@@ -1,0 +1,8 @@
+[  1137s] log Z: [340.1, 336.75, 339.04, 337.34, 340.88, 338.63, 333.91, 334.05, 335.75, 337.25, 335.96, 334.6, 341.67, 342.58, 344.9, 348.18, 343.0, 343.03], max hysteresis error 0.095
+[  1138s] exact posterior on test: family: acc 1.000 (PLL 1.000), E sumP2 1.000 vs E P(true) 1.000, subfamily: acc 1.000 (PLL 0.994), E sumP2 0.999 vs E P(true) 0.999, clade: acc 0.969 (PLL 0.915), E sumP2 0.954 vs E P(true) 0.954
+[  3244s] cloning A_test: k_S soft family 1.93, subfamily 5.36, clade 10.08 | hard family 1.93, subfamily 5.83, clade 15.70
+[  5126s] cloning B_network: k_S soft family 1.94, subfamily 4.91, clade 8.65 | hard family 1.95, subfamily 5.50, clade 17.70
+[  5140s] theory family: 1770 correlated pairs; none k_S 2.09 |gap| 0.0006 logloss 0.069; geo k_S 2.98 |gap| 0.0042 logloss 0.072; prod k_S nan |gap| 0.0217 logloss 0.996; eff k_S 3.76 |gap| 0.0586 logloss 0.147
+[  5157s] theory subfamily: 1766 correlated pairs; none k_S 4.90 |gap| 0.0167 logloss 0.343; geo k_S 6.52 |gap| 0.0119 logloss 0.327; prod k_S nan |gap| 0.0189 logloss 1.994; eff k_S nan |gap| 0.1233 logloss 0.615
+[  5177s] theory clade: 1730 correlated pairs; none k_S 7.51 |gap| 0.0624 logloss 0.796; geo k_S 9.91 |gap| 0.0413 logloss 0.723; prod k_S nan |gap| 0.0139 logloss 2.623; eff k_S nan |gap| 0.1113 logloss 1.046
+[  5179s] done

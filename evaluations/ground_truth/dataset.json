@@ -1,0 +1,13 @@
+{
+  "n_per_clade": 10000,
+  "sizes": {
+    "train": 144000,
+    "val": 18000,
+    "test": 18000
+  },
+  "per_clade": {
+    "train": 8000,
+    "val": 1000,
+    "test": 1000
+  }
+}

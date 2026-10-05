@@ -1,0 +1,587 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm,mathtools}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black,citecolor=blue!50!black]{hyperref}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{tcolorbox}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\graphicspath{{../figures/}}
+
+\newtcolorbox{keybox}[1]{colback=blue!3,colframe=blue!45!black,title={#1},fonttitle=\bfseries,boxrule=0.6pt}
+\newtcolorbox{checkbox}[1]{colback=orange!4,colframe=orange!70!black,title={#1},fonttitle=\bfseries,boxrule=0.6pt}
+\newtheorem{prop}{Proposition}
+
+\newcommand{\s}{\bm{s}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\one}{\mathbf{1}}
+
+\title{\textbf{Protein sequence generation}\\[4pt]
+\large Part I: a hierarchical Potts ground truth and the statistics used to judge generative models\\
+Part II: learning $J$ with a factored-attention transformer\\
+Part III: a masked (absorbing-state) diffusion model\
+Part IV: dynamical regimes (speciation and collapse)}
+\author{Project \texttt{protein\_seq\_gen}}
+\date{24 September 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We build a fully controlled ``toy universe'' of protein sequences. Every sequence is drawn from a
+Potts model, a probability distribution over amino-acid strings defined by site fields $h_i(a)$ and
+pairwise couplings $J_{ij}(a,b)$. We build a tree of such models (root $\to$ 3 families $\to$ 3
+subfamilies each $\to$ 2 clades each, i.e.\ 18 clades), where each child is its parent plus a random
+perturbation that gets smaller as we go down the tree. We check that the models are hierarchically
+different: the distance $\|J^a-J^b\|$ between two clades is fixed by how far up the tree their common
+ancestor sits, and it matches a closed-form prediction to within $0.5\%$. We sample 2000 sequences per
+clade with a Gibbs sampler that uses the exact site conditionals (the same objects that the
+pseudo-likelihood, PLM, is built from). Then we measure what AI-generated sequences will later have
+to reproduce: single-site frequencies, pair correlations, sequence identity, and a PCA projection.
+Part~II builds a transformer whose attention depends only on positions
+($J_{ij}(a,b)=\sum_h\mathrm{softmax}_j(Q^hK^{h\top}/\sqrt d)_{ij}V^h(a,b)$), so that the network \emph{is} a Potts
+model, trained by pseudo-likelihood. It comes in two versions: one learned on all clades at once, and one
+conditioned on hierarchical tags (family / subfamily / clade). The code, tests and evaluation protocol are
+complete. The unconditioned model has been trained ($H=128$, \S\ref{sec:res_uncond}). It finds every true contact
+and learns the \emph{ancestral} couplings, but generates the three families in the wrong proportions
+(22/12/66\%), a known blind spot of pseudo-likelihood. The conditioned model ($H=128$,
+\S\ref{sec:res_cond}) fixes this: a clade tag generates its own clade (18/18) and a family tag its family
+(98--99\%). Its couplings resolve the family level, while subfamily and clade differences are carried mainly
+by the fields. Distance metrics (Hamming, nearest neighbour, Fréchet distance in PCA space) show no memorisation
+and place each generated clade between the noise floor and its sibling clade. With $H=256$ heads the couplings
+are recovered better, but the samples do not improve (\S\ref{sec:res_H256}). Part~III trains a masked diffusion model
+(a time-conditioned transformer that outputs the probabilities of hidden residues, trained on a bound of the full
+likelihood). Without any label it generates the families and clades in the right proportions and reaches $r_C=0.992$
+(true samples 0.994); per clade it matches the tag-conditioned Potts model (\S\ref{sec:md_results}).
+Part~IV transposes the speciation and collapse times of Biroli, Bonnaire, de Bortoli and Mézard (2024) from Gaussian
+noise to masking. Trajectories decide their family after $\approx2$ revealed residues, their subfamily after
+$\approx6$ and their clade after 8--16. The exact minimiser of the loss would collapse onto a training sequence after
+6.2 residues, as a parameter-free (quenched) theory predicts; the trained network never does (\S\ref{sec:dr_results}).
+This document explains every step from scratch and does not skip derivations.
+\end{abstract}
+
+\tableofcontents
+\newpage
+\part{The ground truth}
+
+%==========================================================================================
+\section{Why a synthetic ground truth?}
+%==========================================================================================
+Later in this project we will train AI models (autoregressive, diffusion, \dots) to generate
+protein sequences. The hard question is then: \emph{are the generated sequences good?} With real
+proteins we do not know the true distribution, so we can only compare with a finite alignment.
+
+Here we invert the situation: \textbf{we choose the true distribution ourselves.} We know exactly
+which model produced each sequence, which family it belongs to, and how families relate to each
+other. That lets us ask precise questions of any generative model:
+\begin{itemize}[nosep]
+  \item does it reproduce the site frequencies and the pair correlations of each clade?
+  \item does it place generated sequences in the correct family / subfamily / clade (e.g.\ in PCA space)?
+  \item when conditioned on a family, does it generate that family and not a neighbouring one?
+\end{itemize}
+
+\begin{keybox}{What this document fixes (so that we implement the same thing)}
+\begin{enumerate}[nosep]
+  \item The representation of a sequence (\S\ref{sec:repr}).
+  \item The Potts model, its energy sign convention and its gauge (\S\ref{sec:potts}--\ref{sec:gauge}).
+  \item How the hierarchical tree of models is built and how its hierarchy is checked (\S\ref{sec:tree}).
+  \item How we sample (Gibbs), and its link to PLM (\S\ref{sec:gibbs}).
+  \item The measured quantities: $f_i$, $f_{ij}$, $C_{ij}$, identity, PCA, and the comparison metric (\S\ref{sec:stats}).
+  \item The results obtained on the ground truth, which are the reference numbers for later (\S\ref{sec:results}).
+\end{enumerate}
+\end{keybox}
+
+%==========================================================================================
+\section{Representing a protein sequence}\label{sec:repr}
+%==========================================================================================
+A protein is a chain of amino acids. There are 20 standard amino acids, each with a one-letter code.
+We order them alphabetically,
+\[
+\mathcal{A} = (\texttt{A},\texttt{C},\texttt{D},\texttt{E},\texttt{F},\texttt{G},\texttt{H},\texttt{I},\texttt{K},\texttt{L},
+\texttt{M},\texttt{N},\texttt{P},\texttt{Q},\texttt{R},\texttt{S},\texttt{T},\texttt{V},\texttt{W},\texttt{Y}),
+\qquad q = |\mathcal{A}| = 20 ,
+\]
+and replace each letter by its index $a\in\{0,\dots,q-1\}$ (\texttt{A}$\to0$, \texttt{C}$\to1$, \dots).
+
+A sequence of length $L$ is then a vector $\s=(s_1,\dots,s_L)$ with $s_i\in\{0,\dots,q-1\}$.
+We call $i$ a \emph{site} (a position along the chain) and $a$ a \emph{state} or residue.
+A set of $M$ sequences of the same length (an \emph{alignment}) is an integer matrix of size $M\times L$.
+In this project $L=60$ and $q=20$ (no gap symbol for now).
+
+\paragraph{How many sequences exist?} $q^L = 20^{60}\approx 1.2\times10^{78}$. This number matters:
+anything that requires summing over all sequences is impossible, and much of what follows is about
+avoiding such sums.
+
+\paragraph{One-hot encoding.} It is often convenient to write a residue $a$ at site $i$ as a vector
+of $q$ zeros with a single $1$ in position $a$: $x_{i,b}=\one[s_i=b]$, where $\one[\cdot]$ is 1 if
+the condition is true and 0 otherwise. A whole sequence becomes a binary vector
+$\bm{x}\in\{0,1\}^{Lq}$ with exactly $L$ ones. We use this for PCA (\S\ref{sec:pca}).
+
+%==========================================================================================
+\section{The Potts model}\label{sec:potts}
+%==========================================================================================
+\subsection{Definition}
+A Potts model assigns to every sequence an \emph{energy}
+\begin{equation}\label{eq:energy}
+  \boxed{\;E(\s) = -\sum_{i=1}^{L} h_i(s_i) \;-\; \sum_{1\le i<j\le L} J_{ij}(s_i,s_j)\;}
+\end{equation}
+and a probability given by the Boltzmann distribution
+\begin{equation}\label{eq:boltz}
+  \boxed{\;P(\s) = \frac{1}{Z}\,e^{-\beta E(\s)},\qquad Z=\sum_{\s} e^{-\beta E(\s)}\;}
+\end{equation}
+\begin{itemize}[nosep]
+  \item $h_i(a)$ is the \textbf{field}: how much residue $a$ is favoured at site $i$ \emph{on its own}.
+        A site with one very large $h_i(a)$ is \emph{conserved}.
+  \item $J_{ij}(a,b)$ is the \textbf{coupling}: an extra bonus (if $>0$) or penalty (if $<0$) for having
+        $a$ at site $i$ \emph{and} $b$ at site $j$ at the same time. In real proteins, strong couplings
+        occur mostly between residues that touch in the 3D structure: if one mutates, the other
+        must \emph{co-evolve} to keep the contact working.
+  \item $Z$ is the \textbf{partition function}. It just makes the probabilities sum to 1, but it is a sum
+        over $q^L$ terms, so we can never compute it for $L=60$.
+  \item $\beta$ is an inverse temperature. We always use $\beta=1$; it is kept in the code as a knob
+        (larger $\beta$ = sharper, lower-diversity distribution).
+\end{itemize}
+Low energy means high probability. Because of the minus signs in \eqref{eq:energy}, large positive
+$h$ and $J$ make a sequence \emph{more} likely.
+
+\paragraph{Storage and symmetry.} We store $h$ as an $L\times q$ array and $J$ as an
+$L\times L\times q\times q$ array. The pair $(i,j)$ with $i<j$ is the same physical interaction as
+$(j,i)$, so we impose
+\begin{equation}\label{eq:sym}
+  J_{ji}(b,a) = J_{ij}(a,b), \qquad J_{ii}(\cdot,\cdot) = 0 .
+\end{equation}
+The energy sums over $i<j$ only, so each interaction is counted once.
+
+\paragraph{A worked example} (it is exactly \texttt{test\_energy\_by\_hand}). Take $L=2$, $q=2$, $h_1=(0.5,-0.5)$,
+$h_2=(1,0)$, $J_{12}=\begin{psmallmatrix}1&0\\0&2\end{psmallmatrix}$. Then
+\begin{align*}
+E(0,0) &= -(0.5+1+1) = -2.5, & E(0,1) &= -(0.5+0+0) = -0.5,\\
+E(1,0) &= -(-0.5+1+0) = -0.5, & E(1,1) &= -(-0.5+0+2) = -1.5,
+\end{align*}
+so $P \propto (e^{2.5},e^{0.5},e^{0.5},e^{1.5})$: the state $(0,0)$ is the most likely.
+
+\subsection{Where the Potts form comes from: maximum entropy}\label{sec:maxent}
+Why this particular formula? Suppose all we know about a protein family are its single-site
+frequencies $f_i(a)$ and pair frequencies $f_{ij}(a,b)$ (defined precisely in \S\ref{sec:stats}).
+Among all distributions $P$ that reproduce them, we pick the one that assumes nothing more: the one
+with maximal entropy $S[P]=-\sum_{\s}P(\s)\log P(\s)$. This is a constrained optimisation, and we
+solve it with Lagrange multipliers: $\lambda$ for normalisation, $h_i(a)$ for each single-site
+constraint, $J_{ij}(a,b)$ for each pair constraint:
+\begin{align*}
+\mathcal{L}[P] = &-\sum_{\s}P(\s)\log P(\s) + \lambda\Big(\sum_{\s}P(\s)-1\Big)
+ + \sum_{i,a}h_i(a)\Big(\sum_{\s}P(\s)\one[s_i=a]-f_i(a)\Big)\\
+ &+ \sum_{i<j}\sum_{a,b}J_{ij}(a,b)\Big(\sum_{\s}P(\s)\one[s_i=a]\one[s_j=b]-f_{ij}(a,b)\Big).
+\end{align*}
+Take the derivative with respect to the single number $P(\s)$ for one fixed sequence $\s$. In the
+sums, $\sum_a h_i(a)\one[s_i=a]$ just picks $h_i(s_i)$, and similarly for $J$:
+\begin{gather*}
+\frac{\partial\mathcal{L}}{\partial P(\s)} = -\log P(\s) - 1 + \lambda + \sum_i h_i(s_i) + \sum_{i<j}J_{ij}(s_i,s_j) = 0\\
+\Longrightarrow\quad
+P(\s) = e^{\lambda-1}\exp\Big(\sum_i h_i(s_i)+\sum_{i<j}J_{ij}(s_i,s_j)\Big).
+\end{gather*}
+This is exactly \eqref{eq:boltz} with $\beta=1$ and $e^{\lambda-1}=1/Z$. So \textbf{the Potts model is
+the least-biased distribution consistent with one- and two-site statistics}, and $h$, $J$ are the
+Lagrange multipliers of those constraints. This is why, in the rest of the project, $f_i$ and
+$C_{ij}$ are \emph{the} natural statistics to check.
+
+\subsection{Number of parameters}
+$h$ has $Lq=1200$ entries. $J$ has $\binom{L}{2}q^2 = 1770\times400 = 708{,}000$ entries if every
+pair is coupled. In our ground truth only pairs in a sparse \emph{contact map} are coupled
+(\S\ref{sec:contacts}): 179 pairs, i.e.\ $179\times 400=71{,}600$ non-zero coupling entries.
+
+%==========================================================================================
+\section{Gauge invariance and the zero-sum gauge}\label{sec:gauge}
+%==========================================================================================
+\subsection{The problem: different parameters, same distribution}
+Several different $(h,J)$ give exactly the same $P(\s)$. Take any numbers $u_{ij}(a)$ (one
+vector per ordered pair $i\neq j$) and change
+\begin{equation}\label{eq:gaugetr}
+J'_{ij}(a,b) = J_{ij}(a,b) + u_{ij}(a) + u_{ji}(b),\qquad
+h'_i(a) = h_i(a) - \sum_{j\neq i}u_{ij}(a) + c_i .
+\end{equation}
+The coupling part of the energy changes by
+$-\sum_{i<j}\big[u_{ij}(s_i)+u_{ji}(s_j)\big] = -\sum_i\sum_{j\neq i}u_{ij}(s_i)$
+(each ordered pair appears exactly once), and the field part changes by exactly the opposite
+amount, plus the constant $-\sum_i c_i$. So $E'(\s)=E(\s)+\text{const}$ for all $\s$, and the constant
+cancels in $P=e^{-E}/Z$. \textbf{The distribution is unchanged.} Such a transformation is called a
+\emph{gauge transformation}.
+
+The consequence for us: we cannot compare two models by comparing their raw $J$ arrays. Two
+identical distributions could have a large $\|J-J'\|$. We must first put every model in the same,
+well-defined gauge.
+
+\subsection{The zero-sum gauge}
+Notation: a dot means an average over that index,
+$J_{ij}(a,\cdot)=\frac1q\sum_b J_{ij}(a,b)$, $J_{ij}(\cdot,b)=\frac1q\sum_a J_{ij}(a,b)$,
+$J_{ij}(\cdot,\cdot)=\frac1{q^2}\sum_{a,b}J_{ij}(a,b)$.
+Every $q\times q$ block can be split exactly into four pieces:
+\[
+J_{ij}(a,b) = \underbrace{J_{ij}(\cdot,\cdot)}_{\text{constant}}
+ + \underbrace{\big[J_{ij}(a,\cdot)-J_{ij}(\cdot,\cdot)\big]}_{\text{function of $a$ only}}
+ + \underbrace{\big[J_{ij}(\cdot,b)-J_{ij}(\cdot,\cdot)\big]}_{\text{function of $b$ only}}
+ + J^0_{ij}(a,b),
+\]
+\begin{equation}\label{eq:J0}
+\boxed{\;J^0_{ij}(a,b) = J_{ij}(a,b) - J_{ij}(a,\cdot) - J_{ij}(\cdot,b) + J_{ij}(\cdot,\cdot)\;}
+\end{equation}
+(add the four terms to check that they give back $J_{ij}(a,b)$). The ``function of $a$ only'' and
+``function of $b$ only'' pieces are exactly of the gauge form \eqref{eq:gaugetr}, so they can be
+moved into the fields. Summing the $a$-only pieces from all partners $j$ of site $i$
+(using the symmetry \eqref{eq:sym}, the $b$-only piece of $J_{ji}$ is the $a$-only piece of $J_{ij}$) gives
+\begin{equation}\label{eq:h0}
+\boxed{\;\tilde h_i(a) = h_i(a) + \sum_{j\neq i} J_{ij}(a,\cdot),\qquad h^0_i(a) = \tilde h_i(a) - \tilde h_i(\cdot)\;}
+\end{equation}
+where the last step removes a constant per site. By construction $\sum_a J^0_{ij}(a,b)=\sum_b
+J^0_{ij}(a,b)=0$ and $\sum_a h^0_i(a)=0$, which is where the name comes from. The code is
+\texttt{Potts.zero\_sum\_gauge()}. \texttt{test\_zero\_sum\_gauge\_preserves\_distribution}
+checks, by enumerating all $3^4$ sequences of a random model, that energies shift by one constant.
+
+\begin{prop}[The zero-sum gauge has the smallest $\|J\|$]
+Among all gauge-equivalent couplings, $J^0$ has the smallest Frobenius norm.
+\end{prop}
+\begin{proof}
+Any gauge-equivalent block is $J^0_{ij}(a,b)+g(a)+k(b)$ for some vectors $g,k$ (constants included).
+Its squared norm is
+\begin{align*}
+\sum_{a,b}\big(J^0+g+k\big)^2 &= \sum_{a,b}(J^0)^2 + \sum_{a,b}(g+k)^2\\
+ &\quad + 2\sum_a g(a)\underbrace{\sum_bJ^0(a,b)}_{=0} + 2\sum_b k(b)\underbrace{\sum_aJ^0(a,b)}_{=0}\\
+ &\ge\;\sum_{a,b}(J^0)^2 .\qedhere
+\end{align*}
+\end{proof}
+Geometrically, \eqref{eq:J0} is the \emph{orthogonal projection} of the block onto the subspace of
+matrices whose rows and columns sum to zero. That subspace has dimension $(q-1)^2$: rows and columns
+each lose one degree of freedom. We use this in \S\ref{sec:theory}.
+
+\begin{keybox}{Convention used everywhere}
+All stored ground-truth models are in the zero-sum gauge, and every distance is computed after
+projecting to that gauge: $d_J(a,b)=\big\|J^{0,a}-J^{0,b}\big\|_F$ over pairs $i<j$, and
+$d_h(a,b)=\|h^{0,a}-h^{0,b}\|_F$. Any model learned later must be gauge-fixed the same way before
+its parameters are compared with the ground truth.
+\end{keybox}
+
+%==========================================================================================
+\section{The hierarchical tree of Potts models}\label{sec:tree}
+%==========================================================================================
+\subsection{The contact map}\label{sec:contacts}
+Real couplings are sparse: they concentrate on residue pairs in contact in the folded structure.
+We mimic this with a fixed, symmetric boolean contact map $\mathcal{C}$ ($L\times L$) made of
+\begin{itemize}[nosep]
+  \item the backbone neighbours $(i,i+1)$: 59 pairs;
+  \item 120 random ``long-range'' pairs with $|i-j|\ge 4$ (like contacts between helices or strands).
+\end{itemize}
+Total: $n_c=179$ pairs, 6 contacts per site on average (Figure~\ref{fig:contacts}). $J_{ij}\neq0$ only if
+$(i,j)\in\mathcal{C}$. \textbf{All models in the tree share the same contact map}, as members of one
+protein superfamily share a fold.
+
+\subsection{Drawing the tree}
+Write $\theta=(h,J)$. The tree has four levels, $\ell=0$ (root), $1$ (family), $2$ (subfamily),
+$3$ (clade), and each level $\ell$ has its own noise scales $\sigma_h^{(\ell)}$, $\sigma_J^{(\ell)}$:
+\begin{align}
+\text{root:}\quad & h_i(a)\sim\mathcal{N}\big(0,(\sigma_h^{(0)})^2\big),\qquad
+    J_{ij}(a,b)\sim\mathcal{N}\big(0,(\sigma_J^{(0)})^2\big)\ \text{for }(i,j)\in\mathcal{C},\ i<j,\\
+\text{child at level }\ell:\quad & \theta_{\text{child}} = \theta_{\text{parent}} + \delta^{(\ell)},\qquad
+  \delta^{(\ell)}\ \text{drawn like the root but with } \sigma_h^{(\ell)},\,\sigma_J^{(\ell)} .
+\end{align}
+All draws are independent. $J_{ji}$ is then filled by the symmetry \eqref{eq:sym}. Finally every node is
+projected to the zero-sum gauge (this does not change any distribution). The parameters used:
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+level $\ell$ & 0 root & 1 family & 2 subfamily & 3 clade\\
+\midrule
+number of nodes & 1 & 3 & $3\times3=9$ & $9\times2=18$\\
+$\sigma_h^{(\ell)}$ & 1.5 & 0.9 & 0.5 & 0.3\\
+$\sigma_J^{(\ell)}$ & 0.8 & 0.45 & 0.27 & 0.15\\
+\bottomrule
+\end{tabular}
+\end{center}
+Nodes are named \texttt{F0}, \texttt{F0.S1}, \texttt{F0.S1.C0}, \dots\ The 18 clades are the models we
+sample from. The noise shrinks by a factor of about 0.55--0.6 per level, so a clade is closest to its
+sibling clade, then to its cousins in the same family, then to the other families. The scales were
+chosen (see \S\ref{sec:tuning}) so that the sequences look reasonably protein-like.
+
+\subsection{Expected distances: a prediction we can test}\label{sec:theory}
+Take two clades $a$ and $b$ whose lowest common ancestor (LCA) is at level $\lambda$
+($\lambda=0$: different families; $1$: same family, different subfamilies; $2$: same subfamily).
+Going down from the LCA, each accumulates its own independent perturbations:
+\[
+\theta^a-\theta^b = \sum_{\ell>\lambda}\big(\delta^{(\ell),a}-\delta^{(\ell),b}\big).
+\]
+The gauge projection is linear, so the gauge-fixed difference is the projection of this sum.
+
+\paragraph{Couplings.} Consider one contact block. It is a $q\times q$ matrix $X$ of independent
+$\mathcal{N}(0,\sigma^2)$ entries, and it is projected by an orthogonal projector $\Pi$ of rank $(q-1)^2$. For
+such a projector, $\E\|\Pi X\|^2 = \sigma^2\,\mathrm{tr}\,\Pi = \sigma^2(q-1)^2$. (Proof: in an orthonormal
+basis adapted to $\Pi$, $\Pi X$ keeps $(q-1)^2$ independent Gaussian coordinates of variance $\sigma^2$.)
+The two branches are independent, so their variances add; that gives the factor 2. Summing over the
+$n_c$ contact blocks and the levels below the LCA:
+\begin{equation}\label{eq:dJ}
+\boxed{\;\E\,d_J^2 = 2\,n_c\,(q-1)^2\sum_{\ell>\lambda}\big(\sigma_J^{(\ell)}\big)^2\;}
+\end{equation}
+
+\paragraph{Fields.} By \eqref{eq:h0}, the gauge-fixed field at site $i$ receives the raw field
+perturbation (variance $\sigma_h^2$ per entry) \emph{plus} the row means $J_{ij}(a,\cdot)$ of its
+$d_i$ coupling blocks. Each row mean is an average of $q$ independent Gaussians, so its variance is
+$\sigma_J^2/q$. Centring over $a$ multiplies the total variance of the $q$ entries by $(q-1)/q$. Hence
+$\E\|\Delta h^0_i\|^2 = (q-1)\big(\sigma_h^2 + d_i\sigma_J^2/q\big)$ per branch and level. Using
+$\sum_i d_i = 2n_c$:
+\begin{equation}\label{eq:dh}
+\boxed{\;\E\,d_h^2 = 2\,(q-1)\sum_{\ell>\lambda}\Big(L\big(\sigma_h^{(\ell)}\big)^2 + \frac{2n_c}{q}\big(\sigma_J^{(\ell)}\big)^2\Big)\;}
+\end{equation}
+
+\paragraph{Why the hierarchy is strict and not only true on average.} $d_J^2$ is a sum of
+$n_c(q-1)^2\approx 65{,}000$ independent squared Gaussians. By the law of large numbers its relative
+fluctuation is of order $1/\sqrt{65{,}000}\approx0.4\%$. The gaps between relation levels are
+$\approx50\%$, so every same-subfamily pair is closer than every same-family pair, which is closer
+than every different-family pair. The test \texttt{test\_distances\_are\_hierarchical} asserts exactly
+this strict ordering, and \texttt{test\_distances\_match\_theory} checks \eqref{eq:dJ}--\eqref{eq:dh}.
+
+%==========================================================================================
+\section{Sampling: the Gibbs sampler (and its relation to PLM)}\label{sec:gibbs}
+%==========================================================================================
+\subsection{The site conditional}
+We cannot draw from \eqref{eq:boltz} directly, because we cannot even compute $Z$. But the probability
+of the residue at \emph{one} site, given all the others, is easy. Write $\s_{-i}$ for all sites except $i$:
+\[
+P(s_i=a\mid\s_{-i}) = \frac{P(s_1,\dots,a,\dots,s_L)}{\sum_{b}P(s_1,\dots,b,\dots,s_L)}.
+\]
+$Z$ appears in the numerator and in the denominator and cancels. In the energy, every term that does
+not involve site $i$ is the same in numerator and denominator and also cancels. What remains is
+\begin{equation}\label{eq:cond}
+\boxed{\;P(s_i=a\mid\s_{-i}) = \frac{e^{\beta H_i(a\mid\s_{-i})}}{\sum_{b=0}^{q-1} e^{\beta H_i(b\mid\s_{-i})}},\qquad
+H_i(a\mid\s_{-i}) = h_i(a)+\sum_{j\neq i}J_{ij}(a,s_j)\;}
+\end{equation}
+This is a softmax over only $q=20$ numbers. $H_i$ is the \emph{local field}: the total ``pull'' on site
+$i$ towards each residue, given its current neighbours. Because $J_{ij}=0$ outside contacts, the sum
+only runs over the $\sim6$ contacts of $i$ (the code finds them automatically with
+\texttt{Potts.neighbors()}).
+
+\subsection{Link with the pseudo-likelihood (PLM)}
+The pseudo-likelihood of an alignment is the product of these exact site conditionals,
+$\mathrm{PL}(h,J)=\prod_{m}\prod_i P(s^m_i\mid\s^m_{-i})$. PLM \emph{infers} $(h,J)$ from data by
+maximising it instead of the true likelihood, which needs $Z$. The approximation in PLM lies in
+using PL as the objective for learning. The conditionals themselves are exact.
+
+\begin{checkbox}{How ``sampling with PLM'' is implemented --- please confirm}
+We read ``sample using the PLM approximation'' as: \emph{sample using the site conditionals
+\eqref{eq:cond}, the building blocks of the pseudo-likelihood}. Repeatedly redrawing each site from
+its conditional is the Gibbs sampler. It involves no approximation: its samples converge to the exact
+Potts distribution \eqref{eq:boltz}, which we verify numerically against exact enumeration
+(\S\ref{sec:gibbstests}). If instead you meant \emph{inferring} a Potts model from sequences by PLM
+(e.g.\ to check that $J$ is recoverable, or as a baseline generative model), that is a separate
+function we can build next.
+\end{checkbox}
+
+\subsection{The algorithm}
+\begin{enumerate}[nosep]
+  \item Start $M$ independent chains from uniformly random sequences.
+  \item One \textbf{sweep}: for $i=1,\dots,L$, compute $H_i(\cdot\mid\s_{-i})$ for every chain and
+        redraw $s_i$ from \eqref{eq:cond}.
+  \item Repeat for $T_{\text{burn}}=200$ sweeps (\emph{burn-in}), then keep the final sequence of each chain.
+\end{enumerate}
+Since each chain gives exactly one sequence and chains never interact, the $M=2000$ sequences of a
+clade are \textbf{independent} draws. All chains are updated simultaneously with vectorised numpy
+(\texttt{psg.sampling.gibbs\_sample}). The categorical draw uses the inverse CDF: draw
+$u\sim\mathcal{U}(0,1)$ and take the first $a$ with $\sum_{b\le a}p_b\ge u$.
+
+\subsection{Why it works: stationarity}
+\begin{prop}
+If $\s\sim P$ and we redraw site $i$ from $P(\cdot\mid\s_{-i})$, the new sequence $\s'$ is still distributed as $P$.
+\end{prop}
+\begin{proof}
+$\s'$ has $\s'_{-i}=\s_{-i}$ and a new $s'_i$. Its probability is
+$\sum_{s_i}P(s_i,\s_{-i})\,P(s'_i\mid\s_{-i}) = P(\s_{-i})\,P(s'_i\mid\s_{-i}) = P(s'_i,\s_{-i}) = P(\s')$.
+\end{proof}
+So $P$ is a fixed point of every update, and hence of a sweep. Moreover every conditional
+probability is strictly positive (it is an exponential), so in one sweep any sequence can reach any
+other sequence with non-zero probability. A finite Markov chain with this property has a unique
+stationary distribution and converges to it from any start (Perron--Frobenius theorem). Hence, after
+enough sweeps, each chain's state is a sample of $P$.
+
+\paragraph{How many sweeps is ``enough''?} We monitor two things. (i) The mean energy over chains
+decreases from its random-start value and must reach a plateau. (ii) The energy autocorrelation
+$\rho(k)=\langle\delta E_t\,\delta E_{t+k}\rangle/\langle\delta E^2\rangle$ tells how many sweeps a chain needs
+to forget its past. In our models $\rho$ drops below $0.05$ within about 10--20 sweeps, so 200 sweeps
+of burn-in is ten or more correlation times.
+
+\subsection{Tests of the sampler}\label{sec:gibbstests}
+\begin{itemize}[nosep]
+  \item \textbf{No couplings} ($J=0$): sites are independent and $P(s_i=a)=\mathrm{softmax}(h_i)(a)$
+        exactly. Measured frequencies agree to within binomial noise (Figure~\ref{fig:gibbstests}, left).
+  \item \textbf{Exact enumeration}: for a coupled $L=3,q=3$ model, the $27$ probabilities are computed
+        exactly and compared with 50{,}000 Gibbs samples. Total variation distance
+        $\frac12\sum_{\s}|P_{\text{Gibbs}}(\s)-P(\s)| = 0.0065$ (Figure~\ref{fig:gibbstests}, right).
+  \item \textbf{Conditionals}: \eqref{eq:cond} computed by the code equals ratios of exactly enumerated
+        probabilities, to $10^{-10}$.
+\end{itemize}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.36\linewidth]{tests/test_02_sampling/test_independent_sites/marginals_vs_exact.png}\hfill
+\includegraphics[width=0.6\linewidth]{tests/test_02_sampling/test_gibbs_matches_exact_distribution/state_distribution.png}
+\caption{Sampler validation. Left: with $J=0$, Gibbs marginals vs.\ the exact softmax of the fields.
+Right: all 27 states of a coupled $L=3,q=3$ model, exact vs.\ Gibbs.}
+\label{fig:gibbstests}
+\end{figure}
+
+%==========================================================================================
+\section{Measured quantities}\label{sec:stats}
+%==========================================================================================
+Everything below is computed from an alignment $\{\s^m\}_{m=1}^M$ (one clade, or generated sequences).
+
+\subsection{Frequencies}
+\begin{align}
+f_i(a) &= \frac1M\sum_{m=1}^M\one[s^m_i=a] &&\text{(single-site frequency, an $L\times q$ table)}\\
+f_{ij}(a,b) &= \frac1M\sum_{m=1}^M\one[s^m_i=a]\,\one[s^m_j=b] &&\text{(pair frequency)}
+\end{align}
+Useful identities, which follow from summing an indicator over all its values:
+$\sum_a f_i(a)=1$; $\sum_b f_{ij}(a,b)=f_i(a)$ (marginalisation); $f_{ii}(a,b)=\delta_{ab}f_i(a)$.
+With one-hot vectors, all pair frequencies at once are one matrix product,
+$f = \frac1M X^\top X$ with $X\in\{0,1\}^{M\times Lq}$, which is how the code computes them.
+
+\subsection{Connected correlations}
+\begin{equation}\label{eq:C}
+\boxed{\;C_{ij}(a,b) = f_{ij}(a,b) - f_i(a)\,f_j(b),\qquad i\neq j\;}
+\end{equation}
+If sites $i$ and $j$ were independent, $f_{ij}(a,b)$ would equal $f_i(a)f_j(b)$ and $C$ would vanish.
+So $C$ measures how far the pair is from independence. From the marginalisation identity,
+$\sum_b C_{ij}(a,b)=f_i(a)-f_i(a)\cdot1=0$.
+
+\emph{Worked example} (\texttt{test\_frequencies\_by\_hand}). Take the alignment $\{00,01,11,11\}$ ($q=2$):
+$f_1=(\tfrac12,\tfrac12)$, $f_2=(\tfrac14,\tfrac34)$, $f_{12}(1,1)=\tfrac12$, so
+$C_{12}(1,1)=\tfrac12-\tfrac12\cdot\tfrac34=0.125>0$: residue 1 at site 1 comes with residue 1 at site 2
+more often than chance.
+
+\paragraph{Correlations are not couplings.} If $i$ is coupled to $j$ and $j$ to $k$, then $i$ and $k$
+become correlated \emph{through} $j$, even with $J_{ik}=0$. So $C$ is non-zero on many non-contact
+pairs (Figure~\ref{fig:corr}). This is why inferring $J$ (DCA, PLM) is needed to find contacts, and it
+is also why reproducing $C$ is a demanding test for a generative model: it must capture direct and
+indirect effects together.
+
+\paragraph{Finite-sample noise.} An estimated frequency has standard error
+$\sqrt{f(1-f)/M}$. With $M=2000$ and typical $f_{ij}\sim10^{-2}$, that is $\sim2\times10^{-3}$, the same
+order as many true $C$ values. So even two perfect samples of the same model do not have identical
+$C$. We therefore always report a \textbf{noise floor} (next subsection).
+
+\subsection{The comparison metric}\label{sec:metric}
+To compare a reference alignment $R$ with a generated one $G$ (function \texttt{compare\_statistics}):
+\begin{itemize}[nosep]
+  \item $r_{f}$ = Pearson correlation between all $Lq$ values $f^R_i(a)$ and $f^G_i(a)$;
+  \item $r_C$ = Pearson correlation between all $\binom L2q^2$ values $C^R_{ij}(a,b)$ and $C^G_{ij}(a,b)$, $i<j$;
+  \item RMSE of each, and the slope of $C^G$ vs.\ $C^R$ (a slope $<1$ means correlations are too weak).
+\end{itemize}
+Pearson's $r=\frac{\sum_k(x_k-\bar x)(y_k-\bar y)}{\sqrt{\sum_k(x_k-\bar x)^2\sum_k(y_k-\bar y)^2}}\in[-1,1]$
+is 1 when the points lie on an increasing straight line. $r_C$ is the standard score for
+Potts/DCA-type generative models.
+
+\textbf{Noise floor:} split the 2000 sequences of a clade into two random halves and compute the metric
+between the halves. A perfect generator cannot do better than this (at the same sample size). A useful
+sanity check that the metric can tell things apart: compare a clade with its sibling clade and with
+a clade from another family. The scores must decrease in that order.
+
+\subsection{Sequence identity}
+$\mathrm{id}(\s,\s')=\frac1L\sum_i\one[s_i=s'_i]$, averaged over random pairs within a set or between
+two sets. Random sequences give $1/q=5\%$.
+
+\subsection{Principal component analysis}\label{sec:pca}
+Each sequence is a one-hot vector $\bm{x}\in\{0,1\}^{Lq}$ (1200 dimensions). PCA finds the directions
+along which the sequences vary most.
+\begin{enumerate}[nosep]
+\item Centre: $\bm\mu=\frac1M\sum_m\bm{x}^m$ (this is just $f_i(a)$ laid out as a vector), $\bar{\bm x}^m=\bm x^m-\bm\mu$.
+\item Covariance: $\Sigma=\frac1{M-1}\sum_m\bar{\bm x}^m\bar{\bm x}^{m\top}$. Its $(i,a),(j,b)$ entry is
+      (up to $M/(M-1)$) $f_{ij}(a,b)-f_i(a)f_j(b)$, i.e.\ \textbf{the covariance matrix is exactly the
+      connected-correlation tensor $C$} (with diagonal blocks $\mathrm{diag}(f_i)-f_if_i^\top$).
+\item The variance of the data along a unit direction $\bm u$ is $\bm u^\top\Sigma\bm u$. Maximise it
+      subject to $\|\bm u\|=1$ with a Lagrange multiplier:
+      $\nabla_{\bm u}\big[\bm u^\top\Sigma\bm u-\lambda(\bm u^\top\bm u-1)\big]=2\Sigma\bm u-2\lambda\bm u=0$, so
+      $\Sigma\bm u=\lambda\bm u$. The best direction is an eigenvector, and the variance along it is its
+      eigenvalue $\lambda$. So PC1 is the top eigenvector, PC2 the next one (orthogonal to PC1), etc.
+\item Projection: $z_k^m=\bm u_k^\top(\bm x^m-\bm\mu)$. Explained variance ratio of PC $k$:
+      $\lambda_k/\sum_{k'}\lambda_{k'}$.
+\end{enumerate}
+\textbf{Important for later:} the PCA is fitted \emph{once} on all ground-truth sequences, and its
+$\bm\mu$ and $\bm u_k$ are saved (\texttt{evaluations/ground\_truth/pca\_reference.npz}). Generated
+sequences will be projected with the \emph{same} axes, so that they appear on the same map as the
+real families.
+
+%==========================================================================================
+\section{Results on the ground truth}\label{sec:results}
+%==========================================================================================
+\input{results.tex}
+
+\input{part2.tex}
+
+\input{part3_diffusion.tex}
+
+\input{part3_results.tex}
+
+\input{part4_regimes.tex}
+
+\input{part4_results.tex}
+
+\part{Code and reproduction}
+
+%==========================================================================================
+\section{Code, tests and folder layout}
+%==========================================================================================
+\subsection{Folder layout}
+{\small\begin{verbatim}
+protein_seq_gen/
+  configs/ground_truth.json      all parameters of this document
+  src/psg/                       the library
+     alphabet.py   encoding, FASTA I/O
+     potts.py      Potts class: energy, local field, conditional, zero-sum gauge
+     hierarchy.py  contact map, tree, distances, distance theory
+     sampling.py   Gibbs sampler (numpy)   torch_sampling.py  Gibbs sampler (GPU)
+     stats.py      f_i, f_ij, C_ij, compare_statistics, identity, PCA
+     data.py       top-up, train/val/test split, tags
+     models/factored_attention.py   the two transformers (Part II)
+     training.py   PL training loop        evaluation.py  J recovery, contacts
+     distances.py  Hamming, nearest neighbour, Wasserstein, Frechet distance
+     models/masked_diffusion.py  denoiser, NELBO, samplers (III)
+     diffusion_training.py       training loop, EMA, checkpoints
+     regimes.py                  speciation / collapse tools (IV)
+     plots.py      all figures (one visual style)
+  scripts/                       s01..s03 (Part I), s04 dataset, s05 train, s06 evaluate,
+                                 s07 J vs tree, s08 mode mixing,
+                                 s09/s10 train/evaluate diffusion,
+                                 s11 compare models, s12 t-dependence,
+                                 s13 dynamical regimes
+  tests/                         test_01 ... test_17 (pytest)
+  data/ground_truth_potts/       31 models (.npz), contact_map.npy, tree.json
+  data/sequences/                FASTA per clade + all_sequences.npz (labels)
+  data/splits/                   train/val/test.npz, test_fasta/ (held out)
+  evaluations/ground_truth/      JSON reports, PCA reference, frequencies, energy traces
+  figures/ground_truth/          01_hierarchy, 02_sampling, 03_analysis
+  figures/models/<run>/          training curve, PCA, r_C per clade
+  figures/tests/<test>/<case>/   outcome plots of each test
+  models/<run>/ sampling/<run>/  trained models / their generated sequences
+  docs/                          this document
+\end{verbatim}}
+
+\subsection{What each test checks (Part I; Part II in \S\ref{sec:p2tests})}
+\begin{center}
+\small
+\begin{tabular}{p{0.3\linewidth}p{0.62\linewidth}}
+\toprule
+test & what it verifies\\
+\midrule
+\texttt{test\_01\_potts} & energy of an $L=2,q=2$ model by hand; exact probabilities; conditionals $=$ ratios of enumerated probabilities; neighbour-restricted field; gauge keeps $P$ and is a projection; save/load; FASTA round-trip\\
+\texttt{test\_02\_sampling} & $J=0$ marginals $=$ softmax$(h)$; $L=3,q=3$ Gibbs vs.\ exact (TV $<0.02$); energy relaxes and plateaus\\
+\texttt{test\_03\_hierarchy} & tree shape; symmetry, zero-sum, couplings only on contacts; strict hierarchical ordering of distances; distances match eqs.\ \eqref{eq:dJ}--\eqref{eq:dh} within $10\%$; reproducible with a seed\\
+\texttt{test\_04\_stats} & $f_i,f_{ij},C_{ij}$ on a 4-sequence alignment by hand; copied column gives $C=\mathrm{diag}(f)-ff^\top$; independent columns give $C\approx0$; metric $=1$ on identical sets and $\approx0$ on column-shuffled sets; PCA splits two clusters perfectly\\
+\texttt{test\_05\_pipeline} & the three scripts end-to-end on a tiny tree; the sequence statistics come out in hierarchical order\\
+\texttt{test\_06} \dots\ \texttt{test\_17} & Parts II--IV, see \S\ref{sec:p2tests}, \S\ref{sec:md_tests}, \S\ref{sec:dr_tests}\\
+\bottomrule
+\end{tabular}
+\end{center}
+Run everything with \texttt{python -m pytest} (76 tests). Reproduce everything with the scripts s01--s13
+in order.
+
+\end{document}
